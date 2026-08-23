@@ -1,12 +1,12 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: MVP implemented; reporting, presets, and symbols refactor approved
+> Status: MVP implemented; reporting, presets, and symbols refactor complete
 >
-> Last updated: 2026-08-23
+> Last updated: 2026-08-24
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 2 remains in progress; Phase 3 refactor specification is complete and implementation is pending
+> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phase 3 is complete
 
 ## 1. Project Overview
 
@@ -169,7 +169,7 @@ The application does not cache authorization decisions by default. User roles an
 
 ## 7. Core Data Model
 
-The refactor target uses seven `STRICT` D1 tables:
+The current schema uses seven `STRICT` D1 tables:
 
 - `users`
 - `auth_identities`
@@ -209,7 +209,7 @@ Endpoints, payloads, errors, request limits, security headers, and contract test
 
 ## 12. Migration from SubList
 
-OpenSubLists uses a user-owned JSON archive. The maintainer's reporting-and-symbol cutover uses a one-purpose local transformer and a new D1 database rather than permanent runtime support for the old archive or database shape. Native SubList migration remains an adapter into the current archive model and never writes directly to D1.
+OpenSubLists uses a user-owned JSON archive. A legacy v1-to-v2 operator cutover uses a one-purpose local transformer and a new D1 database rather than permanent runtime support for the old archive or database shape. Native SubList migration remains an adapter into the current archive model and never writes directly to D1.
 
 The archive schema, conflict strategies, security model, validation pipeline, and native mapping policy are defined in [Import and Export](./import-export.md).
 
@@ -259,16 +259,16 @@ Completion criterion: The maintainer can manage all subscriptions locally.
 
 Completion criterion: The maintainer can use the application reliably, and accounts cannot access one another's data.
 
-### Phase 3: Reporting, Presets, and Symbols Refactor — Planned
+### Phase 3: Reporting, Presets, and Symbols Refactor — Complete
 
 - [x] Approve estimated reporting semantics and explicitly reject an actual transaction ledger.
 - [x] Select ECB daily reference rates and a one-Worker scheduled refresh design.
 - [x] Define localized category and payment-method template catalogs.
 - [x] Define common-icon and emoji storage, validation, rendering, and fallbacks.
-- [x] Define the one-time maintainer cutover and rollback path.
-- [ ] Implement the target schema, FX provider, scheduled refresh, Dashboard contract, presets, and symbols.
-- [ ] Rehearse the data cutover against temporary local and remote D1 databases.
-- [ ] Cut over production only after backup, review-table approval, and verification.
+- [x] Define the one-time legacy operator cutover and rollback path.
+- [x] Implement the target schema, FX provider, scheduled refresh, Dashboard contract, presets, and symbols.
+- [x] Rehearse the data cutover against temporary local and remote D1 databases.
+- [x] Cut over production only after backup, review-table approval, and verification.
 
 Completion criterion: The Dashboard provides complete reporting-currency estimates with visible rate metadata, presets create editable ordinary rows, symbols render safely, and the maintainer's original data is verified in the new schema.
 

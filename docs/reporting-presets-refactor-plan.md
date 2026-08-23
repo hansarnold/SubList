@@ -1,9 +1,9 @@
 # Reporting, Presets, and Symbols Refactor Plan
 
-> Status: Approved for implementation
-> Last updated: 2026-08-23
+> Status: Complete
+> Last updated: 2026-08-24
 > Scope: Estimated multi-currency reporting, category and payment-method presets,
-> resource symbols, and the maintainer's one-time production data cutover
+> resource symbols, and a reusable legacy v1-to-v2 operator cutover
 
 ## 1. Outcome
 
@@ -21,7 +21,7 @@ The target experience is:
   of immutable system records.
 - Let categories, payment methods, and subscriptions use either an allow-listed common
   icon or one Unicode emoji.
-- Perform one controlled migration of the maintainer's current data instead of
+- Perform one controlled migration of an operator's legacy data instead of
   maintaining old application schemas and archive versions indefinitely.
 
 ## 2. Approved Product Decisions
@@ -247,7 +247,7 @@ resource.
 
 ## 6. Target Persistence Model
 
-This refactor targets a fresh schema for the maintainer cutover. The application does
+This refactor targets a fresh schema for a legacy operator cutover. The application does
 not need runtime compatibility columns or dual reads.
 
 ### 6.1 `users`
@@ -409,7 +409,7 @@ database so the old production database remains an immediate rollback source.
 10. Populate the first ECB snapshot and verify all active currencies are convertible.
 11. Point the private production Wrangler configuration at the new D1 database,
     deploy, and run authenticated Dashboard and CRUD smoke tests.
-12. Retain the old database and all backups until the maintainer explicitly accepts the
+12. Retain the old database and all backups until the operator explicitly accepts the
     new deployment. Deletion is a separate destructive action.
 
 The product does not retain an old archive importer solely for this cutover. A
@@ -502,7 +502,7 @@ report, or database backup belongs in version control.
 - Automatic bank, card, email, invoice, or App Store ingestion.
 - Arbitrary SVG, remote image URLs, favicon fetching, or uploaded icons.
 - A comprehensive subscription-brand logo library.
-- Runtime support for the pre-refactor database or archive shape after the maintainer
+- Runtime support for the pre-refactor database or archive shape after the operator
   cutover is accepted.
 
 ## 13. Official References

@@ -1,7 +1,7 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: First hosted deployment online; reporting, presets, and symbols refactor planned
-> Last updated: 2026-08-23
+> Status: First hosted deployment online; reporting, presets, and symbols refactor complete
+> Last updated: 2026-08-24
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
 
@@ -165,17 +165,17 @@ These inputs do not block local use:
 
 ## 12. Next Delivery Step
 
-Implement the approved [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md), rehearse its data cutover against temporary local and remote D1 databases, and complete the existing hosted lifecycle smoke test before switching production data.
+Provision isolated preview resources before enabling regular preview releases, and complete the remaining hosted lifecycle smoke test.
 
-## 13. Refactor Implementation Gate
+## 13. Refactor Implementation Gate — Complete
 
-- [ ] Implement target symbol, preset, FX, reporting, API, and archive domain types.
-- [ ] Implement and test the fresh target D1 baseline.
-- [ ] Implement the ECB adapter, singleton snapshot replacement, and daily scheduled handler.
-- [ ] Implement combined Dashboard estimates and original-currency transparency.
-- [ ] Implement first-run category quick add and payment preset prefills.
-- [ ] Implement shared common-icon and single-emoji selection and rendering.
-- [ ] Complete English and Simplified Chinese responsive and accessibility QA.
-- [ ] Preserve raw production export, D1 backup, transformed export, hashes, and review report.
-- [ ] Rehearse and verify the cutover before changing the production D1 binding.
-- [ ] Keep the previous Worker/database pair available until explicit maintainer acceptance.
+- [x] Implement target symbol, preset, FX, reporting, API, and archive domain types.
+- [x] Implement and test the fresh target D1 baseline.
+- [x] Implement the ECB adapter, singleton snapshot replacement, and daily scheduled handler.
+- [x] Implement combined Dashboard estimates and original-currency transparency.
+- [x] Implement first-run category quick add and payment preset prefills.
+- [x] Implement shared common-icon and single-emoji selection and rendering.
+- [x] Complete English and Simplified Chinese responsive and accessibility QA.
+- [x] Preserve raw production export, D1 backup, transformed export, hashes, and review report.
+- [x] Rehearse and verify the cutover before changing the production D1 binding.
+- [x] Keep the previous Worker/database pair available until explicit operator acceptance.

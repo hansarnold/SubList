@@ -2,7 +2,7 @@
 
 OpenSubLists is a small, self-hostable subscription tracker built as a responsive website on Cloudflare Workers and D1.
 
-It provides recurring billing calculations, per-currency reporting, categories, payment methods, and portable JSON import/export. Cloudflare Access supplies invite-only email authentication for hosted environments, while a fixed local identity keeps development fully offline from Access.
+It provides recurring billing calculations, combined reporting-currency estimates with original-currency breakdowns, localized category and payment-method presets, common icon and emoji symbols, and portable JSON import/export. Cloudflare Access supplies invite-only email authentication for hosted environments, while a fixed local identity keeps development fully offline from Access.
 
 ## Stack
 

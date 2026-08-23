@@ -1,7 +1,7 @@
 # OpenSubLists Import and Export Format
 
-> Status: Approved refactor target archive specification
-> Last updated: 2026-08-23  
+> Status: Implemented archive schema version 2
+> Last updated: 2026-08-24
 > Media type: `application/json`  
 > Current target schema version: `2`
 
@@ -351,12 +351,12 @@ If future limits exceed practical batch constraints, imports should move to a re
 
 - `schemaVersion` remains an integer and export always writes the current version.
 - The runtime imports only the current archive version. Older and newer versions fail with `UNSUPPORTED_ARCHIVE_VERSION`.
-- The personal deployment does not carry historical archive transformers indefinitely.
+- The runtime does not carry historical archive transformers indefinitely.
 - An approved breaking refactor preserves the raw archive and D1 backup, runs one deterministic offline transformation, produces a review and verification report, and imports the transformed current archive.
 - The one-time transformer is an operator cutover tool rather than an application compatibility layer.
 - Database migration versions remain unrelated to archive schema versions.
 
-### 15.1 One-time v1-to-v2 Operator Tool
+### 15.1 Legacy v1-to-v2 Operator Tool
 
 The repository contains a cutover-only transformer under
 `tools/refactor-migration/`. It is intentionally separate from the Worker and does

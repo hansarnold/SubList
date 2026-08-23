@@ -1,7 +1,7 @@
 # OpenSubLists Environments and Deployment
 
-> Status: Implemented operations baseline with approved refactor cutover
-> Last updated: 2026-08-23  
+> Status: Implemented operations baseline; legacy cutover procedure retained
+> Last updated: 2026-08-24
 > Deployment platform: Cloudflare
 
 ## 1. Environments
@@ -133,6 +133,7 @@ migrations/
   0001_initial.sql
   0002_resource_limits.sql
   0003_reduce_subscription_limit.sql
+  0004_reporting_presets_symbols.sql
 ```
 
 Migration workflow:
@@ -158,7 +159,7 @@ Prefer expand-and-contract changes:
 4. Switch reads to the new shape.
 5. Remove obsolete columns in a later migration.
 
-The maintainer-only reporting and symbols cutover is an explicit exception. It uses a
+The legacy v1-to-v2 reporting and symbols cutover is an explicit exception. It uses a
 short write freeze, immutable JSON and D1 backups, an offline deterministic transform,
 a fresh target D1 database, and a coordinated Worker binding switch. The previous
 Worker and previous database remain paired for rollback; old and new application
@@ -171,7 +172,7 @@ gates are defined in [Reporting, Presets, and Symbols Refactor Plan](./reporting
 - Fixtures use clearly fictional users, subscriptions, and payment labels.
 - Preview test data is created through normal APIs where possible.
 - Production has no automatic seed beyond first-login user provisioning.
-- Preset catalogs are bundled localized templates, not seed rows. Production categories and payment methods are created only after explicit user action or the reviewed maintainer cutover.
+- Preset catalogs are bundled localized templates, not seed rows. Production categories and payment methods are created only after explicit user action or a reviewed legacy operator cutover.
 
 ## 8. CI Quality Gates
 
@@ -211,7 +212,7 @@ Production smoke test
 
 Automatic production deployment is deferred until the release process is stable.
 
-The first maintainer-only release may deploy directly to the already protected
+An initial operator release may deploy directly to an already protected
 production hostname after all local gates pass. Before subsequent feature releases,
 provision the isolated preview environment and resume the normal preview-first flow.
 
@@ -268,7 +269,7 @@ Initial operational alerts may be manual dashboard checks. Add automated alertin
 - D1 Time Travel is the platform-level recovery mechanism.
 - User-level JSON export is the portability and self-service backup mechanism.
 - Before a risky production migration, confirm the available D1 recovery point or bookmark.
-- Before the maintainer cutover, preserve the raw archive, D1 SQL backup, transformed archive, hashes, and verification report as separate artifacts.
+- Before a legacy v1-to-v2 cutover, preserve the raw archive, D1 SQL backup, transformed archive, hashes, and verification report as separate artifacts.
 - Recovery exercises should be tested against preview before relying on them for production.
 - Application code must tolerate a rollback to the previous Worker version when the schema remains in an expanded compatible state.
 
@@ -288,11 +289,11 @@ Stop writes, assess the affected interval, and use D1 recovery tooling. Do not a
 
 Database migrations are normally forward-fixed rather than reversed.
 
-### Maintainer Refactor Cutover Failure
+### Legacy Refactor Cutover Failure
 
 Restore the previous Worker deployment and its previous D1 binding together. Do not
 point old code at the new schema or new code at the old schema. Keep both databases
-until the maintainer explicitly accepts the cutover.
+until the operator explicitly accepts the cutover.
 
 ## 14. Secrets and Permissions
 
