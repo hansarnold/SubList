@@ -217,12 +217,12 @@ describe("OpenSubLists Worker API", () => {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO users (
-           id, primary_email, email_normalized, timezone, default_currency, created_at, updated_at
+           id, primary_email, email_normalized, timezone, reporting_currency, created_at, updated_at
          ) VALUES (?, ?, ?, 'UTC', 'USD', ?, ?)`,
       ).bind("user-a", "a@example.invalid", "a@example.invalid", now, now),
       env.DB.prepare(
         `INSERT INTO users (
-           id, primary_email, email_normalized, timezone, default_currency, created_at, updated_at
+           id, primary_email, email_normalized, timezone, reporting_currency, created_at, updated_at
          ) VALUES (?, ?, ?, 'UTC', 'USD', ?, ?)`,
       ).bind("user-b", "b@example.invalid", "b@example.invalid", now, now),
     ]);
@@ -233,6 +233,7 @@ describe("OpenSubLists Worker API", () => {
       name: "A category",
       nameKey: "a category",
       color: "#111111",
+      symbol: null,
       position: 0,
       createdAt: now,
       updatedAt: now,
@@ -242,6 +243,7 @@ describe("OpenSubLists Worker API", () => {
       name: "B category",
       nameKey: "b category",
       color: "#222222",
+      symbol: null,
       position: 0,
       createdAt: now,
       updatedAt: now,
@@ -372,6 +374,7 @@ describe("OpenSubLists Worker API", () => {
           id: crypto.randomUUID(),
           name: "Imported overflow",
           color: "#654321",
+          symbol: null,
           position: 102,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -411,6 +414,7 @@ describe("OpenSubLists Worker API", () => {
           id: crypto.randomUUID(),
           name: "Imported during race",
           color: "#654321",
+          symbol: null,
           position: 100,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -430,6 +434,7 @@ describe("OpenSubLists Worker API", () => {
             name: "Concurrent category",
             nameKey: "concurrent category",
             color: "#123456",
+            symbol: null,
             position: 99,
             createdAt: 1,
             updatedAt: 1,
@@ -517,16 +522,17 @@ function archiveWithSubscriptions(count: number) {
   const timestamp = new Date().toISOString();
   return {
     format: "opensublists",
-    schemaVersion: 1,
+    schemaVersion: 2,
     archiveId: crypto.randomUUID(),
     exportedAt: timestamp,
     generator: { name: "OpenSubLists", version: "integration-test" },
-    profile: { displayName: null, timezone: "UTC", defaultCurrency: "USD" },
+    profile: { displayName: null, timezone: "UTC", reportingCurrency: "USD" },
     categories: [],
     paymentMethods: [],
     subscriptions: Array.from({ length: count }, (_, index) => ({
       id: crypto.randomUUID(),
       name: `Imported subscription ${index + 1}`,
+      symbol: null,
       amount: "1.25",
       currency: "USD",
       recurrence: {

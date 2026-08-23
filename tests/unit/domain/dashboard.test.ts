@@ -12,13 +12,15 @@ const productivity = {
   id: "category-productivity",
   name: "Productivity",
   color: "#36B894",
+  symbol: null,
 };
 const utilities = {
   id: "category-utilities",
   name: "Utilities",
   color: "#4D8DFF",
+  symbol: null,
 };
-const visa = { id: "payment-visa", name: "Visa" };
+const visa = { id: "payment-visa", name: "Visa", symbol: null };
 
 function subscription(
   overrides: Partial<DashboardSubscription> &
@@ -32,6 +34,7 @@ function subscription(
   };
 
   return {
+    symbol: null,
     recurrence,
     status: "active",
     archivedAt: null,
@@ -105,6 +108,10 @@ describe("dashboard statistics", () => {
     const usd = statistics.totalsByCurrency[1];
     expect(formatMicrosAsAmount(cny?.upcomingAmountMicros ?? 0n)).toBe("20");
     expect(formatMicrosAsAmount(usd?.upcomingAmountMicros ?? 0n)).toBe("3");
+    expect(formatMicrosAsAmount(cny?.currentMonthAmountMicros ?? 0n)).toBe("20");
+    expect(formatMicrosAsAmount(cny?.currentYearAmountMicros ?? 0n)).toBe("240");
+    expect(formatMicrosAsAmount(usd?.currentMonthAmountMicros ?? 0n)).toBe("41");
+    expect(formatMicrosAsAmount(usd?.currentYearAmountMicros ?? 0n)).toBe("485");
     expect(
       formatRationalMicrosAsAmount(
         cny?.monthlyEstimateMicros ?? { numerator: 0n, denominator: 1n },
@@ -216,7 +223,7 @@ describe("dashboard statistics", () => {
     );
 
     expect(statistics.upcoming).toEqual([]);
-    expect(statistics.nextCharge?.billingOn).toBe("2026-09-30");
+    expect(statistics.nextCharge?.billingOn).toBe("2026-08-30");
   });
 
   it("retains exact estimates until after aggregation", () => {
@@ -259,5 +266,33 @@ describe("dashboard statistics", () => {
         },
       ),
     ).toBe("0.000001");
+  });
+
+  it("replays a future known annual occurrence across the complete current year", () => {
+    const statistics = buildDashboardStatistics(
+      [
+        subscription({
+          id: "annual",
+          name: "Annual subscription",
+          amountMicros: 98_000_000,
+          currency: "CNY",
+          recurrence: {
+            unit: "year",
+            count: 1,
+            anchorOn: "2027-08-19",
+            anchorMode: "calendar_day",
+          },
+        }),
+      ],
+      "2026-08-23",
+      7,
+    );
+
+    expect(
+      formatMicrosAsAmount(statistics.totalsByCurrency[0]?.currentMonthAmountMicros ?? 0n),
+    ).toBe("98");
+    expect(
+      formatMicrosAsAmount(statistics.totalsByCurrency[0]?.currentYearAmountMicros ?? 0n),
+    ).toBe("98");
   });
 });

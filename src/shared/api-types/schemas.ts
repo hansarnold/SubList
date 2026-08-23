@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  ResourceSymbolValidationError,
+  normalizeResourceSymbol,
+  type ResourceSymbol,
+} from "../../domain";
 
 const MAX_SAFE_MICROS = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -65,6 +70,18 @@ export const paymentDisplayLabelSchema = z
 export const recurrenceUnitSchema = z.enum(["day", "week", "month", "year"]);
 export const anchorModeSchema = z.enum(["calendar_day", "end_of_month"]);
 export const statusSchema = z.enum(["active", "cancelled"]);
+export const resourceSymbolSchema = z.unknown().transform((value, context): ResourceSymbol => {
+  try {
+    return normalizeResourceSymbol(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message:
+        error instanceof ResourceSymbolValidationError ? error.message : "The symbol is invalid.",
+    });
+    return z.NEVER;
+  }
+});
 
 export const recurrenceSchema = z
   .strictObject({
@@ -87,13 +104,14 @@ export const updateUserSchema = z
   .strictObject({
     displayName: z.string().trim().min(1).max(120).nullable().optional(),
     timezone: timezoneSchema.optional(),
-    defaultCurrency: currencySchema.optional(),
+    reportingCurrency: currencySchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 
 export const createCategorySchema = z.strictObject({
   name: z.string().trim().min(1).max(80),
   color: colorSchema,
+  symbol: resourceSymbolSchema.default(null),
   position: z.number().int().min(0).default(0),
 });
 
@@ -101,10 +119,15 @@ export const updateCategorySchema = createCategorySchema
   .partial()
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 
+export const createCategoriesBatchSchema = z.strictObject({
+  categories: z.array(createCategorySchema).min(1).max(13),
+});
+
 export const createPaymentMethodSchema = z.strictObject({
   name: z.string().trim().min(1).max(80),
   kind: paymentMethodKindSchema.default("other"),
   label: paymentDisplayLabelSchema.nullable().default(null),
+  symbol: resourceSymbolSchema.default(null),
   position: z.number().int().min(0).default(0),
 });
 
@@ -113,6 +136,7 @@ export const updatePaymentMethodSchema = z
     name: z.string().trim().min(1).max(80).optional(),
     kind: paymentMethodKindSchema.optional(),
     label: paymentDisplayLabelSchema.nullable().optional(),
+    symbol: resourceSymbolSchema.optional(),
     position: z.number().int().min(0).optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
@@ -122,6 +146,7 @@ export const createSubscriptionSchema = z.strictObject({
   amount: amountSchema,
   currency: currencySchema,
   recurrence: recurrenceSchema,
+  symbol: resourceSymbolSchema.default(null),
   categoryId: uuidSchema.nullable().default(null),
   paymentMethodId: uuidSchema.nullable().default(null),
   websiteUrl: nullableUrlSchema.default(null),
@@ -134,6 +159,7 @@ export const updateSubscriptionSchema = z
     amount: amountSchema.optional(),
     currency: currencySchema.optional(),
     recurrence: recurrenceSchema.optional(),
+    symbol: resourceSymbolSchema.optional(),
     categoryId: uuidSchema.nullable().optional(),
     paymentMethodId: uuidSchema.nullable().optional(),
     websiteUrl: nullableUrlSchema.optional(),
@@ -145,6 +171,7 @@ export const categoryArchiveSchema = z.strictObject({
   id: uuidSchema,
   name: z.string().trim().min(1).max(80),
   color: colorSchema,
+  symbol: resourceSymbolSchema,
   position: z.number().int().min(0),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
@@ -155,6 +182,7 @@ export const paymentMethodArchiveSchema = z.strictObject({
   name: z.string().trim().min(1).max(80),
   kind: paymentMethodKindSchema,
   label: paymentDisplayLabelSchema.nullable(),
+  symbol: resourceSymbolSchema,
   position: z.number().int().min(0),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
@@ -166,6 +194,7 @@ export const subscriptionArchiveSchema = z.strictObject({
   amount: amountSchema,
   currency: currencySchema,
   recurrence: recurrenceSchema,
+  symbol: resourceSymbolSchema,
   status: statusSchema,
   cancelledAt: timestampSchema.nullable(),
   archivedAt: timestampSchema.nullable(),
@@ -177,10 +206,10 @@ export const subscriptionArchiveSchema = z.strictObject({
   updatedAt: timestampSchema,
 });
 
-export const archiveV1Schema = z
+export const archiveV2Schema = z
   .object({
     format: z.literal("opensublists"),
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     archiveId: uuidSchema,
     exportedAt: timestampSchema,
     generator: z.strictObject({
@@ -190,7 +219,7 @@ export const archiveV1Schema = z
     profile: z.strictObject({
       displayName: z.string().max(120).nullable(),
       timezone: timezoneSchema,
-      defaultCurrency: currencySchema,
+      reportingCurrency: currencySchema,
     }),
     categories: z.array(categoryArchiveSchema).max(100),
     paymentMethods: z.array(paymentMethodArchiveSchema).max(100),
@@ -198,19 +227,22 @@ export const archiveV1Schema = z
   })
   .passthrough();
 
-export const importPreviewRequestSchema = z.strictObject({ archive: archiveV1Schema });
+export const importPreviewRequestSchema = z.strictObject({ archive: archiveV2Schema });
 
 export const importRequestSchema = z.strictObject({
-  archive: archiveV1Schema,
+  archive: archiveV2Schema,
   expectedDigest: z.string().regex(/^sha256-[a-f0-9]{64}$/),
   conflictStrategy: z.enum(["skip", "overwrite", "duplicate"]),
   importProfile: z.boolean(),
   confirmed: z.literal(true),
 });
 
+export const completeOnboardingSchema = z.strictObject({});
+
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
 export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
+export type CreateCategoriesBatchInput = z.infer<typeof createCategoriesBatchSchema>;
 export type CreatePaymentMethodInput = z.infer<typeof createPaymentMethodSchema>;
 export type UpdatePaymentMethodInput = z.infer<typeof updatePaymentMethodSchema>;
 export type CreateSubscriptionInput = z.infer<typeof createSubscriptionSchema>;

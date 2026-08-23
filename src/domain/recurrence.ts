@@ -68,10 +68,6 @@ export function occurrenceIndexOnOrAfter(rule: RecurrenceRule, targetOn: string)
   assertRecurrenceRule(rule);
   assertIsoCalendarDate(targetOn);
 
-  if (compareIsoCalendarDates(targetOn, rule.anchorOn) <= 0) {
-    return 0;
-  }
-
   let candidateIndex: number;
 
   switch (rule.unit) {
@@ -87,18 +83,29 @@ export function occurrenceIndexOnOrAfter(rule: RecurrenceRule, targetOn: string)
       const anchor = parseIsoCalendarDate(rule.anchorOn);
       const target = parseIsoCalendarDate(targetOn);
       const monthDifference = (target.year - anchor.year) * 12 + (target.month - anchor.month);
-      candidateIndex = Math.max(0, Math.floor(monthDifference / rule.count));
+      candidateIndex = Math.floor(monthDifference / rule.count);
       break;
     }
     case "year": {
       const anchor = parseIsoCalendarDate(rule.anchorOn);
       const target = parseIsoCalendarDate(targetOn);
-      candidateIndex = Math.max(0, Math.floor((target.year - anchor.year) / rule.count));
+      candidateIndex = Math.floor((target.year - anchor.year) / rule.count);
       break;
     }
   }
 
-  const candidate = occurrenceAtUnchecked(rule, candidateIndex);
+  assertOccurrenceIndex(candidateIndex);
+  let candidate: IsoCalendarDate;
+  try {
+    candidate = occurrenceAtUnchecked(rule, candidateIndex);
+  } catch (error) {
+    if (!(error instanceof DomainValidationError) || error.code !== "INVALID_DATE") {
+      throw error;
+    }
+    candidateIndex += 1;
+    assertOccurrenceIndex(candidateIndex);
+    candidate = occurrenceAtUnchecked(rule, candidateIndex);
+  }
   return compareIsoCalendarDates(candidate, targetOn) < 0 ? candidateIndex + 1 : candidateIndex;
 }
 
@@ -248,8 +255,8 @@ function safeProduct(...factors: number[]): number {
 }
 
 function assertOccurrenceIndex(value: number): void {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw invalidRecurrence("Occurrence indexes must be non-negative safe integers.");
+  if (!Number.isSafeInteger(value)) {
+    throw invalidRecurrence("Occurrence indexes must be safe integers.");
   }
 }
 

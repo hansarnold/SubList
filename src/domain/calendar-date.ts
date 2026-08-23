@@ -8,6 +8,11 @@ export interface CalendarDateParts {
   readonly day: number;
 }
 
+export interface CalendarDateWindow {
+  readonly startsOn: IsoCalendarDate;
+  readonly endsOn: IsoCalendarDate;
+}
+
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MIN_YEAR = 1;
 const MAX_YEAR = 9999;
@@ -112,6 +117,22 @@ export function addCalendarDays(date: string, days: number): IsoCalendarDate {
   }
 
   return formatIsoCalendarDate(fromOrdinal(targetOrdinal));
+}
+
+export function calendarMonthWindow(date: string): CalendarDateWindow {
+  const { year, month } = parseIsoCalendarDate(date);
+  return {
+    startsOn: formatIsoCalendarDate({ year, month, day: 1 }),
+    endsOn: formatIsoCalendarDate({ year, month, day: daysInMonth(year, month) }),
+  };
+}
+
+export function calendarYearWindow(date: string): CalendarDateWindow {
+  const { year } = parseIsoCalendarDate(date);
+  return {
+    startsOn: formatIsoCalendarDate({ year, month: 1, day: 1 }),
+    endsOn: formatIsoCalendarDate({ year, month: 12, day: 31 }),
+  };
 }
 
 export function assertIanaTimeZone(timeZone: string): string {

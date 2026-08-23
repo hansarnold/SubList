@@ -1,6 +1,8 @@
 import {
   addCalendarDays,
   assertIsoCalendarDate,
+  calendarMonthWindow,
+  calendarYearWindow,
   compareIsoCalendarDates,
   type IsoCalendarDate,
 } from "./calendar-date";
@@ -25,21 +27,25 @@ import {
   type RecurrenceRule,
   type SubscriptionStatus,
 } from "./recurrence";
+import type { ResourceSymbol } from "./symbol";
 
 export interface DashboardCategory {
   readonly id: string;
   readonly name: string;
   readonly color: string;
+  readonly symbol: ResourceSymbol;
 }
 
 export interface DashboardPaymentMethod {
   readonly id: string;
   readonly name: string;
+  readonly symbol: ResourceSymbol;
 }
 
 export interface DashboardSubscription {
   readonly id: string;
   readonly name: string;
+  readonly symbol: ResourceSymbol;
   readonly amountMicros: number;
   readonly currency: CurrencyCode;
   readonly recurrence: RecurrenceRule;
@@ -52,6 +58,7 @@ export interface DashboardSubscription {
 export interface DashboardOccurrence {
   readonly subscriptionId: string;
   readonly name: string;
+  readonly symbol: ResourceSymbol;
   readonly amountMicros: number;
   readonly currency: CurrencyCode;
   readonly billingOn: IsoCalendarDate;
@@ -64,12 +71,15 @@ export interface ExactCurrencyTotals {
   readonly monthlyEstimateMicros: Rational;
   readonly annualizedEstimateMicros: Rational;
   readonly upcomingAmountMicros: bigint;
+  readonly currentMonthAmountMicros: bigint;
+  readonly currentYearAmountMicros: bigint;
 }
 
 export interface DashboardBreakdown {
   readonly id: string | null;
   readonly name: string | null;
   readonly color: string | null;
+  readonly symbol: ResourceSymbol;
   readonly subscriptionCount: number;
   readonly totalsByCurrency: ExactCurrencyTotals[];
 }
@@ -86,12 +96,15 @@ export interface DashboardStatistics {
 
 interface MutableCurrencyTotals extends NormalizedEstimates {
   upcomingAmountMicros: bigint;
+  currentMonthAmountMicros: bigint;
+  currentYearAmountMicros: bigint;
 }
 
 interface MutableBreakdown {
   readonly id: string | null;
   readonly name: string | null;
   readonly color: string | null;
+  readonly symbol: ResourceSymbol;
   subscriptionCount: number;
   readonly totalsByCurrency: Map<CurrencyCode, MutableCurrencyTotals>;
 }
@@ -111,6 +124,8 @@ export function buildDashboardStatistics(
   }
 
   const upcomingThrough = addCalendarDays(localToday, upcomingDays - 1);
+  const currentMonth = calendarMonthWindow(localToday);
+  const currentYear = calendarYearWindow(localToday);
   const totals = new Map<CurrencyCode, MutableCurrencyTotals>();
   const categories = new Map<string | null, MutableBreakdown>();
   const paymentMethods = new Map<string | null, MutableBreakdown>();
@@ -128,13 +143,28 @@ export function buildDashboardStatistics(
       subscription.recurrence.unit,
       subscription.recurrence.count,
     );
-    addEstimateToCurrencyMap(totals, subscription.currency, normalized, 0n);
+    const currentMonthAmountMicros = occurrenceAmountInsideWindow(
+      subscription,
+      currentMonth.startsOn,
+      currentMonth.endsOn,
+    );
+    const currentYearAmountMicros = occurrenceAmountInsideWindow(
+      subscription,
+      currentYear.startsOn,
+      currentYear.endsOn,
+    );
+    addEstimateToCurrencyMap(totals, subscription.currency, normalized, {
+      upcomingAmountMicros: 0n,
+      currentMonthAmountMicros,
+      currentYearAmountMicros,
+    });
 
     const categoryGroup = getOrCreateBreakdown(
       categories,
       subscription.category?.id ?? null,
       subscription.category?.name ?? null,
       subscription.category?.color ?? null,
+      subscription.category?.symbol ?? null,
     );
     addSubscriptionToBreakdown(categoryGroup, subscription.currency, normalized);
 
@@ -143,6 +173,7 @@ export function buildDashboardStatistics(
       subscription.paymentMethod?.id ?? null,
       subscription.paymentMethod?.name ?? null,
       null,
+      subscription.paymentMethod?.symbol ?? null,
     );
     addSubscriptionToBreakdown(paymentMethodGroup, subscription.currency, normalized);
 
@@ -160,12 +191,11 @@ export function buildDashboardStatistics(
     )) {
       const occurrence = toOccurrence(subscription, billingOn);
       upcoming.push(occurrence);
-      addEstimateToCurrencyMap(
-        totals,
-        subscription.currency,
-        ZERO_NORMALIZED_ESTIMATES,
-        BigInt(subscription.amountMicros),
-      );
+      addEstimateToCurrencyMap(totals, subscription.currency, ZERO_NORMALIZED_ESTIMATES, {
+        upcomingAmountMicros: BigInt(subscription.amountMicros),
+        currentMonthAmountMicros: 0n,
+        currentYearAmountMicros: 0n,
+      });
     }
   }
 
@@ -198,6 +228,7 @@ function toOccurrence(
   return {
     subscriptionId: subscription.id,
     name: subscription.name,
+    symbol: subscription.symbol,
     amountMicros: subscription.amountMicros,
     currency: subscription.currency,
     billingOn,
@@ -210,16 +241,23 @@ function addEstimateToCurrencyMap(
   map: Map<CurrencyCode, MutableCurrencyTotals>,
   currency: CurrencyCode,
   normalized: NormalizedEstimates,
-  upcomingAmountMicros: bigint,
+  amounts: Pick<
+    MutableCurrencyTotals,
+    "upcomingAmountMicros" | "currentMonthAmountMicros" | "currentYearAmountMicros"
+  >,
 ): void {
   const current = map.get(currency) ?? {
     ...ZERO_NORMALIZED_ESTIMATES,
     upcomingAmountMicros: 0n,
+    currentMonthAmountMicros: 0n,
+    currentYearAmountMicros: 0n,
   };
   const combined = addNormalizedEstimates(current, normalized);
   map.set(currency, {
     ...combined,
-    upcomingAmountMicros: current.upcomingAmountMicros + upcomingAmountMicros,
+    upcomingAmountMicros: current.upcomingAmountMicros + amounts.upcomingAmountMicros,
+    currentMonthAmountMicros: current.currentMonthAmountMicros + amounts.currentMonthAmountMicros,
+    currentYearAmountMicros: current.currentYearAmountMicros + amounts.currentYearAmountMicros,
   });
 }
 
@@ -228,6 +266,7 @@ function getOrCreateBreakdown(
   id: string | null,
   name: string | null,
   color: string | null,
+  symbol: ResourceSymbol,
 ): MutableBreakdown {
   const existing = map.get(id);
   if (existing) {
@@ -238,6 +277,7 @@ function getOrCreateBreakdown(
     id,
     name,
     color,
+    symbol,
     subscriptionCount: 0,
     totalsByCurrency: new Map(),
   };
@@ -251,7 +291,11 @@ function addSubscriptionToBreakdown(
   normalized: NormalizedEstimates,
 ): void {
   breakdown.subscriptionCount += 1;
-  addEstimateToCurrencyMap(breakdown.totalsByCurrency, currency, normalized, 0n);
+  addEstimateToCurrencyMap(breakdown.totalsByCurrency, currency, normalized, {
+    upcomingAmountMicros: 0n,
+    currentMonthAmountMicros: 0n,
+    currentYearAmountMicros: 0n,
+  });
 }
 
 function finalizeCurrencyTotals(
@@ -264,6 +308,8 @@ function finalizeCurrencyTotals(
       monthlyEstimateMicros: total.monthlyEstimateMicros,
       annualizedEstimateMicros: total.annualizedEstimateMicros,
       upcomingAmountMicros: total.upcomingAmountMicros,
+      currentMonthAmountMicros: total.currentMonthAmountMicros,
+      currentYearAmountMicros: total.currentYearAmountMicros,
     }));
 }
 
@@ -285,6 +331,7 @@ function finalizeBreakdowns(
       id: breakdown.id,
       name: breakdown.name,
       color: breakdown.color,
+      symbol: breakdown.symbol,
       subscriptionCount: breakdown.subscriptionCount,
       totalsByCurrency: finalizeCurrencyTotals(breakdown.totalsByCurrency),
     }));
@@ -307,5 +354,18 @@ export function emptyExactCurrencyTotal(currency: CurrencyCode): ExactCurrencyTo
     monthlyEstimateMicros: makeRational(0n),
     annualizedEstimateMicros: makeRational(0n),
     upcomingAmountMicros: 0n,
+    currentMonthAmountMicros: 0n,
+    currentYearAmountMicros: 0n,
   };
+}
+
+function occurrenceAmountInsideWindow(
+  subscription: DashboardSubscription,
+  startsOn: IsoCalendarDate,
+  endsOn: IsoCalendarDate,
+): bigint {
+  const occurrences = projectOccurrences(subscription.recurrence, startsOn, endsOn, {
+    maxOccurrences: 366,
+  });
+  return BigInt(subscription.amountMicros) * BigInt(occurrences.length);
 }

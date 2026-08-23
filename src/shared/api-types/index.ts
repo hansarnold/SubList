@@ -1,3 +1,7 @@
+import type { ResourceSymbol } from "../../domain";
+
+export type { CommonIconKey, ResourceSymbol } from "../../domain";
+
 export type ApiData<T> = { data: T };
 
 export type ApiList<T> = {
@@ -25,7 +29,8 @@ export type User = {
   email: string;
   displayName: string | null;
   timezone: string;
-  defaultCurrency: string;
+  reportingCurrency: string;
+  onboardingCompletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -34,6 +39,7 @@ export type Category = {
   id: string;
   name: string;
   color: string;
+  symbol: ResourceSymbol;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +52,7 @@ export type PaymentMethod = {
   name: string;
   kind: PaymentMethodKind;
   label: string | null;
+  symbol: ResourceSymbol;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -66,6 +73,7 @@ export type SubscriptionStatus = "active" | "cancelled";
 export type Subscription = {
   id: string;
   name: string;
+  symbol: ResourceSymbol;
   amount: string;
   currency: string;
   recurrence: Recurrence;
@@ -84,10 +92,11 @@ export type Subscription = {
 export type UpcomingCharge = {
   subscriptionId: string;
   name: string;
+  symbol: ResourceSymbol;
   amount: string;
   currency: string;
   billingOn: string;
-  category: Pick<Category, "id" | "name" | "color"> | null;
+  category: Pick<Category, "id" | "name" | "color" | "symbol"> | null;
 };
 
 export type CurrencyTotals = {
@@ -95,32 +104,70 @@ export type CurrencyTotals = {
   monthlyEstimate: string;
   annualizedEstimate: string;
   upcomingAmount: string;
+  currentMonthCharges: string;
+  currentYearCharges: string;
 };
 
 export type CategoryBreakdown = {
   categoryId: string | null;
   categoryName: string | null;
   categoryColor: string | null;
+  categorySymbol: ResourceSymbol;
   subscriptionCount: number;
   totalsByCurrency: Array<{
     currency: string;
     monthlyEstimate: string;
     annualizedEstimate: string;
   }>;
+  reportingMonthlyAverage: string | null;
+  reportingAnnualized: string | null;
+};
+
+export type PaymentMethodBreakdown = {
+  paymentMethodId: string | null;
+  paymentMethodName: string | null;
+  paymentMethodSymbol: ResourceSymbol;
+  subscriptionCount: number;
+  reportingMonthlyAverage: string | null;
+  reportingAnnualized: string | null;
+};
+
+export type ReportingEstimate = {
+  amount: string;
+  currency: string;
+};
+
+export type FxStatus = {
+  state: "not_needed" | "fresh" | "stale" | "unavailable";
+  provider: "ecb" | null;
+  rateDate: string | null;
+  fetchedAt: string | null;
+  missingCurrencies: string[];
+};
+
+export type DashboardReporting = {
+  currency: string;
+  monthlyAverage: ReportingEstimate | null;
+  annualized: ReportingEstimate | null;
+  currentMonthCharges: ReportingEstimate | null;
+  currentYearCharges: ReportingEstimate | null;
+  fx: FxStatus;
 };
 
 export type Dashboard = {
   localToday: string;
   upcomingThrough: string;
   nextCharge: UpcomingCharge | null;
+  reporting: DashboardReporting;
   totalsByCurrency: CurrencyTotals[];
   upcoming: UpcomingCharge[];
   categoryBreakdown: CategoryBreakdown[];
+  paymentMethodBreakdown: PaymentMethodBreakdown[];
 };
 
-export type OpenSubListsArchiveV1 = {
+export type OpenSubListsArchiveV2 = {
   format: "opensublists";
-  schemaVersion: 1;
+  schemaVersion: 2;
   archiveId: string;
   exportedAt: string;
   generator: {
@@ -130,7 +177,7 @@ export type OpenSubListsArchiveV1 = {
   profile: {
     displayName: string | null;
     timezone: string;
-    defaultCurrency: string;
+    reportingCurrency: string;
   };
   categories: Category[];
   paymentMethods: PaymentMethod[];
@@ -145,7 +192,7 @@ export type ImportWarning = {
 
 export type ImportPreview = {
   digest: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
   counts: {
     categories: number;
     paymentMethods: number;

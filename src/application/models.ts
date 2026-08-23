@@ -4,6 +4,7 @@ import type {
   RecurrenceUnit,
   SubscriptionStatus,
 } from "../shared/api-types";
+import type { ResourceSymbol } from "../domain";
 
 export type AuthenticatedIdentity = {
   provider: "cloudflare_access" | "local_development";
@@ -16,7 +17,8 @@ export type AppUser = {
   primaryEmail: string;
   displayName: string | null;
   timezone: string;
-  defaultCurrency: string;
+  reportingCurrency: string;
+  onboardingCompletedAt: number | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -26,6 +28,7 @@ export type AppCategory = {
   name: string;
   nameKey: string;
   color: string;
+  symbol: ResourceSymbol;
   position: number;
   createdAt: number;
   updatedAt: number;
@@ -36,6 +39,7 @@ export type AppPaymentMethod = {
   name: string;
   kind: PaymentMethodKind;
   label: string | null;
+  symbol: ResourceSymbol;
   position: number;
   createdAt: number;
   updatedAt: number;
@@ -58,6 +62,7 @@ export type AppSubscription = {
   archivedAt: number | null;
   categoryId: string | null;
   paymentMethodId: string | null;
+  symbol: ResourceSymbol;
   websiteUrl: string | null;
   notes: string | null;
   createdAt: number;
@@ -65,8 +70,8 @@ export type AppSubscription = {
 };
 
 export type AppDashboardSubscription = AppSubscription & {
-  category: { id: string; name: string; color: string } | null;
-  paymentMethod: { id: string; name: string } | null;
+  category: { id: string; name: string; color: string; symbol: ResourceSymbol } | null;
+  paymentMethod: { id: string; name: string; symbol: ResourceSymbol } | null;
 };
 
 export type SubscriptionListFilter = {

@@ -11,6 +11,8 @@ export interface Rational {
 }
 
 const CANONICAL_AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d{1,6}))?$/;
+const POSITIVE_DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d+))?$/;
+const MAX_RATE_DECIMAL_LENGTH = 64;
 
 // ISO 4217 active currencies and commonly used ISO fund/metal/testing codes.
 const SUPPORTED_CURRENCIES = new Set([
@@ -289,6 +291,47 @@ export function addRationals(left: Rational, right: Rational): Rational {
     left.numerator * right.denominator + right.numerator * left.denominator,
     left.denominator * right.denominator,
   );
+}
+
+export function multiplyRationals(left: Rational, right: Rational): Rational {
+  return makeRational(left.numerator * right.numerator, left.denominator * right.denominator);
+}
+
+export function divideRationals(left: Rational, right: Rational): Rational {
+  if (right.numerator === 0n) {
+    throw new RangeError("A rational divisor cannot be zero.");
+  }
+
+  return makeRational(left.numerator * right.denominator, left.denominator * right.numerator);
+}
+
+export function parsePositiveDecimalToRational(value: string): Rational {
+  if (value.length > MAX_RATE_DECIMAL_LENGTH || !POSITIVE_DECIMAL_PATTERN.test(value)) {
+    throw new DomainValidationError(
+      "INVALID_EXCHANGE_RATE",
+      "Exchange rates must be positive canonical decimal strings.",
+      "rate",
+    );
+  }
+
+  const [whole = "0", fraction = ""] = value.split(".");
+  const numerator = BigInt(whole) * 10n ** BigInt(fraction.length) + BigInt(fraction || "0");
+  if (numerator <= 0n) {
+    throw new DomainValidationError(
+      "INVALID_EXCHANGE_RATE",
+      "Exchange rates must be greater than zero.",
+      "rate",
+    );
+  }
+
+  return makeRational(numerator, 10n ** BigInt(fraction.length));
+}
+
+export function canonicalizePositiveDecimal(value: string): string {
+  parsePositiveDecimalToRational(value);
+  const [whole = "0", fraction = ""] = value.split(".");
+  const canonicalFraction = fraction.replace(/0+$/, "");
+  return canonicalFraction.length === 0 ? whole : `${whole}.${canonicalFraction}`;
 }
 
 export function divideRational(value: Rational, divisor: bigint): Rational {

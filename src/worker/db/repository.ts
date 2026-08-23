@@ -9,20 +9,29 @@ import type {
 } from "../../application/models";
 import type {
   CategoryWrite,
+  FxSnapshotReplaceResult,
   ImportMutation,
   OpenSubListsRepository,
   PaymentMethodWrite,
   SubscriptionWrite,
 } from "../../application/ports";
-import { normalizeEmailAddress } from "../../domain";
+import {
+  assertFxSnapshot,
+  canonicalizePositiveDecimal,
+  normalizeEmailAddress,
+  type FxSnapshot,
+  type ResourceSymbol,
+} from "../../domain";
 import {
   mapCategoryRow,
   mapDashboardSubscriptionRow,
+  mapFxSnapshotRows,
   mapPaymentMethodRow,
   mapSubscriptionRow,
   mapUserRow,
   type CategoryRow,
   type DashboardSubscriptionRow,
+  type FxSnapshotJoinRow,
   type PaymentMethodRow,
   type SubscriptionRow,
   type UserRow,
@@ -32,8 +41,10 @@ const SUBSCRIPTION_COLUMNS = `
   user_id, id, name, amount_micros, currency, recurrence_unit,
   recurrence_count, billing_anchor_on, anchor_mode, next_billing_on,
   status, cancelled_at, archived_at, category_id, payment_method_id,
-  website_url, notes, created_at, updated_at
+  symbol_type, symbol_value, website_url, notes, created_at, updated_at
 `;
+
+const CATEGORY_BATCH_LIMIT = 13;
 
 export class D1OpenSubListsRepository implements OpenSubListsRepository {
   constructor(private readonly db: D1Database) {}
@@ -112,7 +123,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
           .prepare(
             `INSERT INTO users (
                id, primary_email, email_normalized, display_name, timezone,
-               default_currency, created_at, updated_at
+               reporting_currency, created_at, updated_at
              ) VALUES (?, ?, ?, NULL, 'UTC', 'USD', ?, ?)`,
           )
           .bind(userId, identity.email, emailNormalized, now, now),
@@ -167,7 +178,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       primaryEmail: identity.email,
       displayName: null,
       timezone: "UTC",
-      defaultCurrency: "USD",
+      reportingCurrency: "USD",
+      onboardingCompletedAt: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -195,7 +207,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
 
   async updateUser(
     userId: string,
-    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "defaultCurrency">>,
+    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">>,
     now: number,
   ): Promise<AppUser | null> {
     await this.userUpdateStatement(userId, patch, now).run();
@@ -204,7 +216,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
 
   async updateUserWithReconciliation(
     userId: string,
-    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "defaultCurrency">>,
+    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">>,
     updates: Array<{ id: string; nextBillingOn: string; updatedAt: number }>,
     now: number,
   ): Promise<AppUser | null> {
@@ -218,7 +230,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
 
   private userUpdateStatement(
     userId: string,
-    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "defaultCurrency">>,
+    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">>,
     now: number,
   ): D1PreparedStatement {
     const assignments: string[] = [];
@@ -231,15 +243,27 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       assignments.push("timezone = ?");
       values.push(patch.timezone);
     }
-    if (patch.defaultCurrency !== undefined) {
-      assignments.push("default_currency = ?");
-      values.push(patch.defaultCurrency);
+    if (patch.reportingCurrency !== undefined) {
+      assignments.push("reporting_currency = ?");
+      values.push(patch.reportingCurrency);
     }
     assignments.push("updated_at = ?");
     values.push(now, userId);
     return this.db
       .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
       .bind(...values);
+  }
+
+  async completeOnboarding(userId: string, now: number): Promise<AppUser | null> {
+    await this.db
+      .prepare(
+        `UPDATE users
+         SET onboarding_completed_at = ?, updated_at = ?
+         WHERE id = ? AND onboarding_completed_at IS NULL`,
+      )
+      .bind(now, now, userId)
+      .run();
+    return this.getUser(userId);
   }
 
   async listCategories(userId: string): Promise<AppCategory[]> {
@@ -259,33 +283,51 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
   }
 
   async createCategory(userId: string, value: CategoryWrite): Promise<AppCategory | null> {
+    const created = await this.createCategories(userId, [value]);
+    return created?.[0] ?? null;
+  }
+
+  async createCategories(userId: string, values: CategoryWrite[]): Promise<AppCategory[] | null> {
+    if (values.length < 1 || values.length > CATEGORY_BATCH_LIMIT) {
+      throw new RangeError(
+        `Category batches must contain between 1 and ${CATEGORY_BATCH_LIMIT} records.`,
+      );
+    }
+    const serialized = JSON.stringify(values);
     const result = await this.db
       .prepare(
         `INSERT INTO categories (
-           user_id, id, name, name_key, color, position, created_at, updated_at
+           user_id, id, name, name_key, color, symbol_type, symbol_value,
+           position, created_at, updated_at
          )
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?
-         WHERE (SELECT COUNT(*) FROM categories WHERE user_id = ?) < 100`,
+         SELECT ?,
+                json_extract(item.value, '$.id'),
+                json_extract(item.value, '$.name'),
+                json_extract(item.value, '$.nameKey'),
+                json_extract(item.value, '$.color'),
+                json_extract(item.value, '$.symbol.type'),
+                json_extract(item.value, '$.symbol.value'),
+                CAST(json_extract(item.value, '$.position') AS INTEGER),
+                CAST(json_extract(item.value, '$.createdAt') AS INTEGER),
+                CAST(json_extract(item.value, '$.updatedAt') AS INTEGER)
+         FROM json_each(?) AS item
+         WHERE (
+           SELECT COUNT(*) FROM categories WHERE user_id = ?
+         ) + json_array_length(?) <= 100`,
       )
-      .bind(
-        userId,
-        value.id,
-        value.name,
-        value.nameKey,
-        value.color,
-        value.position,
-        value.createdAt,
-        value.updatedAt,
-        userId,
-      )
+      .bind(userId, serialized, userId, serialized)
       .run();
-    return result.meta.changes === 0 ? null : { ...value };
+    if (result.meta.changes === 0) return null;
+    if (result.meta.changes !== values.length) {
+      throw new Error("The category batch was not written atomically.");
+    }
+    return values.map((value) => ({ ...value }));
   }
 
   async updateCategory(
     userId: string,
     id: string,
-    patch: Partial<Pick<AppCategory, "name" | "nameKey" | "color" | "position">>,
+    patch: Partial<Pick<AppCategory, "name" | "nameKey" | "color" | "symbol" | "position">>,
     now: number,
   ): Promise<AppCategory | null> {
     const assignments: string[] = [];
@@ -301,6 +343,11 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         assignments.push(`${column} = ?`);
         values.push(value);
       }
+    }
+    if ("symbol" in patch) {
+      const [symbolType, symbolValue] = symbolColumns(patch.symbol ?? null);
+      assignments.push("symbol_type = ?", "symbol_value = ?");
+      values.push(symbolType, symbolValue);
     }
     assignments.push("updated_at = ?");
     values.push(now, userId, id);
@@ -346,9 +393,10 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     const result = await this.db
       .prepare(
         `INSERT INTO payment_methods (
-           user_id, id, name, kind, label, position, created_at, updated_at
+           user_id, id, name, kind, label, symbol_type, symbol_value,
+           position, created_at, updated_at
          )
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (SELECT COUNT(*) FROM payment_methods WHERE user_id = ?) < 100`,
       )
       .bind(
@@ -357,6 +405,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         value.name,
         value.kind,
         value.label,
+        ...symbolColumns(value.symbol),
         value.position,
         value.createdAt,
         value.updatedAt,
@@ -369,7 +418,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
   async updatePaymentMethod(
     userId: string,
     id: string,
-    patch: Partial<Pick<AppPaymentMethod, "name" | "kind" | "label" | "position">>,
+    patch: Partial<Pick<AppPaymentMethod, "name" | "kind" | "label" | "symbol" | "position">>,
     now: number,
   ): Promise<AppPaymentMethod | null> {
     const assignments: string[] = [];
@@ -384,6 +433,11 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         assignments.push(`${column} = ?`);
         values.push(patch[field] ?? null);
       }
+    }
+    if ("symbol" in patch) {
+      const [symbolType, symbolValue] = symbolColumns(patch.symbol ?? null);
+      assignments.push("symbol_type = ?", "symbol_value = ?");
+      values.push(symbolType, symbolValue);
     }
     assignments.push("updated_at = ?");
     values.push(now, userId, id);
@@ -476,7 +530,11 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         `SELECT s.*,
                 c.name AS category_name,
                 c.color AS category_color,
-                p.name AS payment_method_name
+                c.symbol_type AS category_symbol_type,
+                c.symbol_value AS category_symbol_value,
+                p.name AS payment_method_name,
+                p.symbol_type AS payment_method_symbol_type,
+                p.symbol_value AS payment_method_symbol_value
          FROM subscriptions s
          LEFT JOIN categories c ON c.user_id = s.user_id AND c.id = s.category_id
          LEFT JOIN payment_methods p ON p.user_id = s.user_id AND p.id = s.payment_method_id
@@ -520,7 +578,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
            name = ?, amount_micros = ?, currency = ?, recurrence_unit = ?,
            recurrence_count = ?, billing_anchor_on = ?, anchor_mode = ?,
            next_billing_on = ?, status = ?, cancelled_at = ?, archived_at = ?,
-           category_id = ?, payment_method_id = ?, website_url = ?, notes = ?, updated_at = ?
+           category_id = ?, payment_method_id = ?, symbol_type = ?, symbol_value = ?,
+           website_url = ?, notes = ?, updated_at = ?
          WHERE user_id = ? AND id = ?`,
       )
       .bind(
@@ -537,6 +596,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         value.archivedAt,
         value.categoryId,
         value.paymentMethodId,
+        ...symbolColumns(value.symbol),
         value.websiteUrl,
         value.notes,
         value.updatedAt,
@@ -580,6 +640,66 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       .bind(JSON.stringify(updates), userId);
   }
 
+  async getFxSnapshot(): Promise<FxSnapshot | null> {
+    const result = await this.db
+      .prepare(
+        `SELECT snapshot.id AS snapshot_id,
+                snapshot.provider,
+                snapshot.rate_date,
+                snapshot.base_currency,
+                snapshot.fetched_at,
+                snapshot.rate_count,
+                rate.currency AS rate_currency,
+                rate.units_per_eur
+         FROM fx_snapshot AS snapshot
+         LEFT JOIN fx_rates AS rate ON rate.snapshot_id = snapshot.id
+         WHERE snapshot.id = 1
+         ORDER BY rate.currency`,
+      )
+      .all<FxSnapshotJoinRow>();
+    return mapFxSnapshotRows(result.results);
+  }
+
+  async replaceFxSnapshot(snapshot: FxSnapshot): Promise<FxSnapshotReplaceResult> {
+    const normalized = canonicalFxSnapshot(snapshot);
+    const existing = await this.getFxSnapshot();
+    if (
+      existing !== null &&
+      existing.provider === normalized.provider &&
+      existing.rateDate >= normalized.rateDate
+    ) {
+      return "unchanged";
+    }
+
+    const serializedRates = JSON.stringify(normalized.rates);
+    await this.db.batch([
+      this.db.prepare("DELETE FROM fx_snapshot WHERE id = 1"),
+      this.db
+        .prepare(
+          `INSERT INTO fx_snapshot (
+             id, provider, rate_date, base_currency, fetched_at, rate_count
+           ) VALUES (1, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          normalized.provider,
+          normalized.rateDate,
+          normalized.baseCurrency,
+          normalized.fetchedAt,
+          normalized.rates.length,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO fx_rates (snapshot_id, currency, units_per_eur)
+           SELECT 1,
+                  json_extract(item.value, '$.currency'),
+                  json_extract(item.value, '$.unitsPerEur')
+           FROM json_each(?) AS item`,
+        )
+        .bind(serializedRates),
+    ]);
+    return "replaced";
+  }
+
   async getImportState(userId: string): Promise<ExistingImportState> {
     const [categories, paymentMethods, subscriptions] = await Promise.all([
       this.db
@@ -606,7 +726,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
   async applyImport(
     userId: string,
     mutations: ImportMutation[],
-    profilePatch: Pick<AppUser, "displayName" | "timezone" | "defaultCurrency"> | null,
+    profilePatch: Pick<AppUser, "displayName" | "timezone" | "reportingCurrency"> | null,
     reconciliationUpdates: Array<{ id: string; nextBillingOn: string; updatedAt: number }>,
     now: number,
   ): Promise<void> {
@@ -615,13 +735,13 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       statements.push(
         this.db
           .prepare(
-            `UPDATE users SET display_name = ?, timezone = ?, default_currency = ?, updated_at = ?
+            `UPDATE users SET display_name = ?, timezone = ?, reporting_currency = ?, updated_at = ?
              WHERE id = ?`,
           )
           .bind(
             profilePatch.displayName ?? null,
             profilePatch.timezone,
-            profilePatch.defaultCurrency,
+            profilePatch.reportingCurrency,
             now,
             userId,
           ),
@@ -657,13 +777,16 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         this.db
           .prepare(
             `INSERT INTO categories (
-               user_id, id, name, name_key, color, position, created_at, updated_at
+               user_id, id, name, name_key, color, symbol_type, symbol_value,
+               position, created_at, updated_at
              )
              SELECT ?,
                     json_extract(item.value, '$.id'),
                     json_extract(item.value, '$.name'),
                     json_extract(item.value, '$.nameKey'),
                     json_extract(item.value, '$.color'),
+                    json_extract(item.value, '$.symbol.type'),
+                    json_extract(item.value, '$.symbol.value'),
                     CAST(json_extract(item.value, '$.position') AS INTEGER),
                     CAST(json_extract(item.value, '$.createdAt') AS INTEGER),
                     CAST(json_extract(item.value, '$.updatedAt') AS INTEGER)
@@ -680,6 +803,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
              SET name = json_extract(item.value, '$.name'),
                  name_key = json_extract(item.value, '$.nameKey'),
                  color = json_extract(item.value, '$.color'),
+                 symbol_type = json_extract(item.value, '$.symbol.type'),
+                 symbol_value = json_extract(item.value, '$.symbol.value'),
                  position = CAST(json_extract(item.value, '$.position') AS INTEGER),
                  updated_at = ?
              FROM json_each(?) AS item
@@ -694,13 +819,16 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         this.db
           .prepare(
             `INSERT INTO payment_methods (
-               user_id, id, name, kind, label, position, created_at, updated_at
+               user_id, id, name, kind, label, symbol_type, symbol_value,
+               position, created_at, updated_at
              )
              SELECT ?,
                     json_extract(item.value, '$.id'),
                     json_extract(item.value, '$.name'),
                     json_extract(item.value, '$.kind'),
                     json_extract(item.value, '$.label'),
+                    json_extract(item.value, '$.symbol.type'),
+                    json_extract(item.value, '$.symbol.value'),
                     CAST(json_extract(item.value, '$.position') AS INTEGER),
                     CAST(json_extract(item.value, '$.createdAt') AS INTEGER),
                     CAST(json_extract(item.value, '$.updatedAt') AS INTEGER)
@@ -717,6 +845,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
              SET name = json_extract(item.value, '$.name'),
                  kind = json_extract(item.value, '$.kind'),
                  label = json_extract(item.value, '$.label'),
+                 symbol_type = json_extract(item.value, '$.symbol.type'),
+                 symbol_value = json_extract(item.value, '$.symbol.value'),
                  position = CAST(json_extract(item.value, '$.position') AS INTEGER),
                  updated_at = ?
              FROM json_each(?) AS item
@@ -746,7 +876,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
            user_id, id, name, amount_micros, currency, recurrence_unit,
            recurrence_count, billing_anchor_on, anchor_mode, next_billing_on,
            status, cancelled_at, archived_at, category_id, payment_method_id,
-           website_url, notes, created_at, updated_at
+           symbol_type, symbol_value, website_url, notes, created_at, updated_at
          )
          SELECT ?,
                 json_extract(item.value, '$.id'),
@@ -763,6 +893,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
                 CAST(json_extract(item.value, '$.archivedAt') AS INTEGER),
                 json_extract(item.value, '$.categoryId'),
                 json_extract(item.value, '$.paymentMethodId'),
+                json_extract(item.value, '$.symbol.type'),
+                json_extract(item.value, '$.symbol.value'),
                 json_extract(item.value, '$.websiteUrl'),
                 json_extract(item.value, '$.notes'),
                 CAST(json_extract(item.value, '$.createdAt') AS INTEGER),
@@ -793,6 +925,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
              archived_at = CAST(json_extract(item.value, '$.archivedAt') AS INTEGER),
              category_id = json_extract(item.value, '$.categoryId'),
              payment_method_id = json_extract(item.value, '$.paymentMethodId'),
+             symbol_type = json_extract(item.value, '$.symbol.type'),
+             symbol_value = json_extract(item.value, '$.symbol.value'),
              website_url = json_extract(item.value, '$.websiteUrl'),
              notes = json_extract(item.value, '$.notes'),
              updated_at = ?
@@ -819,8 +953,8 @@ function subscriptionInsertSql(): string {
     user_id, id, name, amount_micros, currency, recurrence_unit,
     recurrence_count, billing_anchor_on, anchor_mode, next_billing_on,
     status, cancelled_at, archived_at, category_id, payment_method_id,
-    website_url, notes, created_at, updated_at
-  ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+    symbol_type, symbol_value, website_url, notes, created_at, updated_at
+  ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
 }
 
 function subscriptionValues(userId: string, value: SubscriptionWrite): unknown[] {
@@ -840,11 +974,26 @@ function subscriptionValues(userId: string, value: SubscriptionWrite): unknown[]
     value.archivedAt,
     value.categoryId,
     value.paymentMethodId,
+    ...symbolColumns(value.symbol),
     value.websiteUrl,
     value.notes,
     value.createdAt,
     value.updatedAt,
   ];
+}
+
+function symbolColumns(symbol: ResourceSymbol): [string | null, string | null] {
+  return symbol === null ? [null, null] : [symbol.type, symbol.value];
+}
+
+function canonicalFxSnapshot(snapshot: FxSnapshot): FxSnapshot {
+  return assertFxSnapshot({
+    ...snapshot,
+    rates: snapshot.rates.map((rate) => ({
+      currency: rate.currency,
+      unitsPerEur: canonicalizePositiveDecimal(rate.unitsPerEur),
+    })),
+  });
 }
 
 function chunks<T>(values: T[], size = 25): T[][] {

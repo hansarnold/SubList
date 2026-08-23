@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   addCalendarDays,
   assertIanaTimeZone,
+  calendarMonthWindow,
+  calendarYearWindow,
   compareIsoCalendarDates,
   differenceInCalendarDays,
   isIsoCalendarDate,
@@ -49,6 +51,17 @@ describe("ISO calendar dates", () => {
   it("rejects date arithmetic outside the supported range", () => {
     expect(() => addCalendarDays("0001-01-01", -1)).toThrowError();
     expect(() => addCalendarDays("9999-12-31", 1)).toThrowError();
+  });
+
+  it("derives complete local calendar month and year windows", () => {
+    expect(calendarMonthWindow("2024-02-23")).toEqual({
+      startsOn: "2024-02-01",
+      endsOn: "2024-02-29",
+    });
+    expect(calendarYearWindow("2026-08-23")).toEqual({
+      startsOn: "2026-01-01",
+      endsOn: "2026-12-31",
+    });
   });
 });
 

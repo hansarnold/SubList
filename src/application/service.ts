@@ -2,24 +2,31 @@ import {
   assertCurrencyCode,
   assertIanaTimeZone,
   buildDashboardStatistics,
+  buildReportingTotals,
   calculateNextBillingOn,
   formatMicrosAsAmount,
   formatRationalMicrosAsAmount,
   localTodayInTimeZone,
   normalizeCategoryNameKey,
+  normalizeResourceSymbol,
   parseAmountToMicros,
+  type ExactCurrencyTotals,
+  type FxSnapshot,
+  type IsoCalendarDate,
+  type Rational,
 } from "../domain";
 import type {
   Category,
   Dashboard,
   ImportPreview,
   ImportResult,
-  OpenSubListsArchiveV1,
+  OpenSubListsArchiveV2,
   PaymentMethod,
   Subscription,
   User,
 } from "../shared/api-types";
 import type {
+  CreateCategoriesBatchInput,
   CreateCategoryInput,
   CreatePaymentMethodInput,
   CreateSubscriptionInput,
@@ -63,6 +70,7 @@ export class OpenSubListsService {
   constructor(
     private readonly repository: OpenSubListsRepository,
     private readonly now: () => number = Date.now,
+    private readonly refreshFxSnapshot?: () => Promise<FxSnapshot>,
   ) {}
 
   resolveUser(identity: AuthenticatedIdentity): Promise<AppUser> {
@@ -73,15 +81,21 @@ export class OpenSubListsService {
     return toApiUser(await this.requireUser(userId));
   }
 
+  async completeOnboarding(userId: string): Promise<User> {
+    const user = await this.repository.completeOnboarding(userId, this.now());
+    if (user === null) throw notFound("User");
+    return toApiUser(user);
+  }
+
   async updateMe(userId: string, input: UpdateUserInput): Promise<User> {
-    if (input.defaultCurrency !== undefined) assertCurrencyCode(input.defaultCurrency);
+    if (input.reportingCurrency !== undefined) assertCurrencyCode(input.reportingCurrency);
     if (input.timezone !== undefined) assertIanaTimeZone(input.timezone);
     const before = await this.requireUser(userId);
     const now = this.now();
-    const patch: Partial<Pick<AppUser, "displayName" | "timezone" | "defaultCurrency">> = {};
+    const patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">> = {};
     if (input.displayName !== undefined) patch.displayName = input.displayName;
     if (input.timezone !== undefined) patch.timezone = input.timezone;
-    if (input.defaultCurrency !== undefined) patch.defaultCurrency = input.defaultCurrency;
+    if (input.reportingCurrency !== undefined) patch.reportingCurrency = input.reportingCurrency;
     let updated: AppUser | null;
     if (input.timezone !== undefined && input.timezone !== before.timezone) {
       updated = await this.repository.updateUserWithReconciliation(
@@ -126,13 +140,46 @@ export class OpenSubListsService {
     }
   }
 
+  async createCategories(userId: string, input: CreateCategoriesBatchInput): Promise<Category[]> {
+    const nameKeys = new Set<string>();
+    const now = this.now();
+    const writes = input.categories.map((category) => {
+      const nameKey = normalizeCategoryNameKey(category.name);
+      if (nameKeys.has(nameKey)) {
+        throw conflict("The category batch contains duplicate names.");
+      }
+      nameKeys.add(nameKey);
+      return {
+        ...category,
+        id: crypto.randomUUID(),
+        nameKey,
+        createdAt: now,
+        updatedAt: now,
+      };
+    });
+
+    try {
+      const categories = await this.repository.createCategories(userId, writes);
+      if (categories === null) {
+        throw conflict(`Category limit of ${RESOURCE_LIMITS.categories} reached.`);
+      }
+      return categories.map(toApiCategory);
+    } catch (error) {
+      const resourceLimitError = mapResourceLimitError(error);
+      if (resourceLimitError !== null) throw resourceLimitError;
+      throw mapConstraintError(error, "A category with this name already exists.");
+    }
+  }
+
   async updateCategory(userId: string, id: string, input: UpdateCategoryInput): Promise<Category> {
-    const patch: Partial<Pick<AppCategory, "name" | "nameKey" | "color" | "position">> = {};
+    const patch: Partial<Pick<AppCategory, "name" | "nameKey" | "color" | "symbol" | "position">> =
+      {};
     if (input.name !== undefined) {
       patch.name = input.name;
       patch.nameKey = normalizeCategoryNameKey(input.name);
     }
     if (input.color !== undefined) patch.color = input.color;
+    if (input.symbol !== undefined) patch.symbol = input.symbol;
     if (input.position !== undefined) patch.position = input.position;
     try {
       const category = await this.repository.updateCategory(userId, id, patch, this.now());
@@ -180,10 +227,13 @@ export class OpenSubListsService {
     id: string,
     input: UpdatePaymentMethodInput,
   ): Promise<PaymentMethod> {
-    const patch: Partial<Pick<AppPaymentMethod, "name" | "kind" | "label" | "position">> = {};
+    const patch: Partial<
+      Pick<AppPaymentMethod, "name" | "kind" | "label" | "symbol" | "position">
+    > = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.kind !== undefined) patch.kind = input.kind;
     if (input.label !== undefined) patch.label = input.label;
+    if (input.symbol !== undefined) patch.symbol = input.symbol;
     if (input.position !== undefined) patch.position = input.position;
     const paymentMethod = await this.repository.updatePaymentMethod(userId, id, patch, this.now());
     if (paymentMethod === null) throw notFound("Payment method");
@@ -226,6 +276,7 @@ export class OpenSubListsService {
       const subscription = await this.repository.createSubscription(userId, {
         id: crypto.randomUUID(),
         name: input.name,
+        symbol: input.symbol,
         amountMicros,
         currency,
         recurrence: input.recurrence,
@@ -278,6 +329,7 @@ export class OpenSubListsService {
       ...(input.amount === undefined ? {} : { amountMicros: parseAmountToMicros(input.amount) }),
       ...(input.currency === undefined ? {} : { currency: assertCurrencyCode(input.currency) }),
       ...(input.recurrence === undefined ? {} : { recurrence: input.recurrence }),
+      ...(input.symbol === undefined ? {} : { symbol: input.symbol }),
       ...(input.categoryId === undefined ? {} : { categoryId: input.categoryId }),
       ...(input.paymentMethodId === undefined ? {} : { paymentMethodId: input.paymentMethodId }),
       ...(input.websiteUrl === undefined ? {} : { websiteUrl: input.websiteUrl }),
@@ -345,9 +397,10 @@ export class OpenSubListsService {
   }
 
   async getDashboard(userId: string, upcomingDays: number): Promise<Dashboard> {
-    const [user, rows] = await Promise.all([
+    const [user, rows, storedSnapshot] = await Promise.all([
       this.requireUser(userId),
       this.repository.listDashboardSubscriptions(userId),
+      this.repository.getFxSnapshot(),
     ]);
     const now = this.now();
     const localToday = localTodayInTimeZone(user.timezone, now);
@@ -364,6 +417,31 @@ export class OpenSubListsService {
     await this.repository.reconcileSubscriptions(userId, stale);
 
     const statistics = buildDashboardStatistics(rows, localToday, upcomingDays);
+    let snapshot = storedSnapshot;
+    const requiresFx = statistics.totalsByCurrency.some(
+      (total) => total.currency !== user.reportingCurrency,
+    );
+    if (requiresFx && snapshot === null && this.refreshFxSnapshot !== undefined) {
+      try {
+        snapshot = await this.refreshFxSnapshot();
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            message: "fx_initial_refresh_failed",
+            errorName: error instanceof Error ? error.name : "UnknownError",
+          }),
+        );
+      }
+    }
+    const exactReporting = buildReportingTotals(
+      statistics.totalsByCurrency,
+      assertCurrencyCode(user.reportingCurrency),
+      localToday,
+      snapshot,
+    );
+    const reportingAvailable = exactReporting.state !== "unavailable";
+    const fxMetadata = exactReporting.state === "not_needed" ? null : snapshot;
+
     return {
       localToday: statistics.localToday,
       upcomingThrough: statistics.upcomingThrough,
@@ -373,20 +451,47 @@ export class OpenSubListsService {
           : {
               subscriptionId: statistics.nextCharge.subscriptionId,
               name: statistics.nextCharge.name,
+              symbol: statistics.nextCharge.symbol,
               amount: formatMicrosAsAmount(statistics.nextCharge.amountMicros),
               currency: statistics.nextCharge.currency,
               billingOn: statistics.nextCharge.billingOn,
               category: statistics.nextCharge.category,
             },
+      reporting: {
+        currency: user.reportingCurrency,
+        monthlyAverage: toReportingEstimate(
+          exactReporting.monthlyAverageMicros,
+          user.reportingCurrency,
+        ),
+        annualized: toReportingEstimate(exactReporting.annualizedMicros, user.reportingCurrency),
+        currentMonthCharges: toReportingEstimate(
+          exactReporting.currentMonthChargesMicros,
+          user.reportingCurrency,
+        ),
+        currentYearCharges: toReportingEstimate(
+          exactReporting.currentYearChargesMicros,
+          user.reportingCurrency,
+        ),
+        fx: {
+          state: exactReporting.state,
+          provider: fxMetadata?.provider ?? null,
+          rateDate: fxMetadata?.rateDate ?? null,
+          fetchedAt: fxMetadata === null ? null : new Date(fxMetadata.fetchedAt).toISOString(),
+          missingCurrencies: exactReporting.missingCurrencies,
+        },
+      },
       totalsByCurrency: statistics.totalsByCurrency.map((total) => ({
         currency: total.currency,
         monthlyEstimate: formatRationalMicrosAsAmount(total.monthlyEstimateMicros),
         annualizedEstimate: formatRationalMicrosAsAmount(total.annualizedEstimateMicros),
         upcomingAmount: formatMicrosAsAmount(total.upcomingAmountMicros),
+        currentMonthCharges: formatMicrosAsAmount(total.currentMonthAmountMicros),
+        currentYearCharges: formatMicrosAsAmount(total.currentYearAmountMicros),
       })),
       upcoming: statistics.upcoming.map((occurrence) => ({
         subscriptionId: occurrence.subscriptionId,
         name: occurrence.name,
+        symbol: occurrence.symbol,
         amount: formatMicrosAsAmount(occurrence.amountMicros),
         currency: occurrence.currency,
         billingOn: occurrence.billingOn,
@@ -396,17 +501,38 @@ export class OpenSubListsService {
         categoryId: breakdown.id,
         categoryName: breakdown.name,
         categoryColor: breakdown.color,
+        categorySymbol: breakdown.symbol,
         subscriptionCount: breakdown.subscriptionCount,
+        ...toBreakdownReporting(
+          breakdown.totalsByCurrency,
+          user.reportingCurrency,
+          localToday,
+          snapshot,
+          reportingAvailable,
+        ),
         totalsByCurrency: breakdown.totalsByCurrency.map((total) => ({
           currency: total.currency,
           monthlyEstimate: formatRationalMicrosAsAmount(total.monthlyEstimateMicros),
           annualizedEstimate: formatRationalMicrosAsAmount(total.annualizedEstimateMicros),
         })),
       })),
+      paymentMethodBreakdown: statistics.paymentMethodBreakdown.map((breakdown) => ({
+        paymentMethodId: breakdown.id,
+        paymentMethodName: breakdown.name,
+        paymentMethodSymbol: breakdown.symbol,
+        subscriptionCount: breakdown.subscriptionCount,
+        ...toBreakdownReporting(
+          breakdown.totalsByCurrency,
+          user.reportingCurrency,
+          localToday,
+          snapshot,
+          reportingAvailable,
+        ),
+      })),
     };
   }
 
-  async exportArchive(userId: string): Promise<OpenSubListsArchiveV1> {
+  async exportArchive(userId: string): Promise<OpenSubListsArchiveV2> {
     const [user, categories, paymentMethods, subscriptions] = await Promise.all([
       this.requireUser(userId),
       this.repository.listCategories(userId),
@@ -415,14 +541,14 @@ export class OpenSubListsService {
     ]);
     return {
       format: "opensublists",
-      schemaVersion: 1,
+      schemaVersion: 2,
       archiveId: crypto.randomUUID(),
       exportedAt: new Date(this.now()).toISOString(),
       generator: { name: "OpenSubLists", version: "0.1.0" },
       profile: {
         displayName: user.displayName,
         timezone: user.timezone,
-        defaultCurrency: user.defaultCurrency,
+        reportingCurrency: user.reportingCurrency,
       },
       categories: categories.sort(comparePositionAndId).map(toApiCategory),
       paymentMethods: paymentMethods.sort(comparePositionAndId).map(toApiPaymentMethod),
@@ -440,7 +566,7 @@ export class OpenSubListsService {
     validateCategoryNameConflicts(archive, state, "skip");
     return {
       digest: await archiveDigest(archive),
-      schemaVersion: 1,
+      schemaVersion: 2,
       counts: {
         categories: archive.categories.length,
         paymentMethods: archive.paymentMethods.length,
@@ -500,6 +626,7 @@ export class OpenSubListsService {
           name: category.name,
           nameKey: normalizeCategoryNameKey(category.name),
           color: category.color,
+          symbol: normalizeResourceSymbol(category.symbol),
           position: category.position,
           createdAt: Date.parse(category.createdAt),
           updatedAt: Date.parse(category.updatedAt),
@@ -538,6 +665,7 @@ export class OpenSubListsService {
         subscription: {
           id: duplicateIds.subscriptions.get(subscription.id) ?? subscription.id,
           name: subscription.name,
+          symbol: normalizeResourceSymbol(subscription.symbol),
           amountMicros: parseAmountToMicros(subscription.amount),
           currency: assertCurrencyCode(subscription.currency),
           recurrence,
@@ -572,7 +700,7 @@ export class OpenSubListsService {
           ? {
               displayName: archive.profile.displayName,
               timezone: archive.profile.timezone,
-              defaultCurrency: assertCurrencyCode(archive.profile.defaultCurrency),
+              reportingCurrency: assertCurrencyCode(archive.profile.reportingCurrency),
             }
           : null,
         reconciliationUpdates,
@@ -665,13 +793,54 @@ export class OpenSubListsService {
   }
 }
 
+function toReportingEstimate(value: Rational | null, currency: string) {
+  return value === null
+    ? null
+    : {
+        amount: formatRationalMicrosAsAmount(value),
+        currency,
+      };
+}
+
+function toBreakdownReporting(
+  totals: readonly ExactCurrencyTotals[],
+  reportingCurrency: string,
+  localToday: IsoCalendarDate,
+  snapshot: FxSnapshot | null,
+  reportingAvailable: boolean,
+): { reportingMonthlyAverage: string | null; reportingAnnualized: string | null } {
+  if (!reportingAvailable) {
+    return { reportingMonthlyAverage: null, reportingAnnualized: null };
+  }
+  const reporting = buildReportingTotals(
+    totals,
+    assertCurrencyCode(reportingCurrency),
+    localToday,
+    snapshot,
+  );
+  return {
+    reportingMonthlyAverage:
+      reporting.monthlyAverageMicros === null
+        ? null
+        : formatRationalMicrosAsAmount(reporting.monthlyAverageMicros),
+    reportingAnnualized:
+      reporting.annualizedMicros === null
+        ? null
+        : formatRationalMicrosAsAmount(reporting.annualizedMicros),
+  };
+}
+
 export function toApiUser(value: AppUser): User {
   return {
     id: value.id,
     email: value.primaryEmail,
     displayName: value.displayName,
     timezone: value.timezone,
-    defaultCurrency: value.defaultCurrency,
+    reportingCurrency: value.reportingCurrency,
+    onboardingCompletedAt:
+      value.onboardingCompletedAt === null
+        ? null
+        : new Date(value.onboardingCompletedAt).toISOString(),
     createdAt: new Date(value.createdAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
   };
@@ -682,6 +851,7 @@ function toApiCategory(value: AppCategory): Category {
     id: value.id,
     name: value.name,
     color: value.color,
+    symbol: value.symbol,
     position: value.position,
     createdAt: new Date(value.createdAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
@@ -694,6 +864,7 @@ function toApiPaymentMethod(value: AppPaymentMethod): PaymentMethod {
     name: value.name,
     kind: value.kind,
     label: value.label,
+    symbol: value.symbol,
     position: value.position,
     createdAt: new Date(value.createdAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
@@ -706,6 +877,7 @@ function toApiSubscription(
   return {
     id: value.id,
     name: value.name,
+    symbol: value.symbol,
     amount: formatMicrosAsAmount(value.amountMicros),
     currency: value.currency,
     recurrence: value.recurrence,
@@ -727,6 +899,7 @@ function toArchiveSubscription(value: AppSubscription): Omit<Subscription, "next
   return {
     id: subscription.id,
     name: subscription.name,
+    symbol: subscription.symbol,
     amount: subscription.amount,
     currency: subscription.currency,
     recurrence: subscription.recurrence,
@@ -756,23 +929,30 @@ function comparePositionAndId<T extends { position: number; id: string }>(
   return left.position - right.position || left.id.localeCompare(right.id);
 }
 
-function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV1 {
-  const archive = source as OpenSubListsArchiveV1;
+function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV2 {
+  const archive = source as OpenSubListsArchiveV2;
   return {
     format: "opensublists",
-    schemaVersion: 1,
+    schemaVersion: 2,
     archiveId: archive.archiveId,
     exportedAt: new Date(archive.exportedAt).toISOString(),
     generator: { name: "OpenSubLists", version: archive.generator.version },
     profile: {
       displayName: archive.profile.displayName,
       timezone: assertIanaTimeZone(archive.profile.timezone),
-      defaultCurrency: assertCurrencyCode(archive.profile.defaultCurrency),
+      reportingCurrency: assertCurrencyCode(archive.profile.reportingCurrency),
     },
-    categories: archive.categories.map((category) => ({ ...category })),
-    paymentMethods: archive.paymentMethods.map((method) => ({ ...method })),
+    categories: archive.categories.map((category) => ({
+      ...category,
+      symbol: normalizeResourceSymbol(category.symbol),
+    })),
+    paymentMethods: archive.paymentMethods.map((method) => ({
+      ...method,
+      symbol: normalizeResourceSymbol(method.symbol),
+    })),
     subscriptions: archive.subscriptions.map((subscription) => ({
       ...subscription,
+      symbol: normalizeResourceSymbol(subscription.symbol),
       amount: formatMicrosAsAmount(parseAmountToMicros(subscription.amount)),
       currency: assertCurrencyCode(subscription.currency),
     })),
@@ -793,7 +973,7 @@ function buildReconciliationUpdates(
 }
 
 function validateImportCapacity(
-  archive: OpenSubListsArchiveV1,
+  archive: OpenSubListsArchiveV2,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): void {
@@ -840,7 +1020,7 @@ function mapResourceLimitError(error: unknown): ApplicationError | null {
   return null;
 }
 
-function validateArchiveRelationships(archive: OpenSubListsArchiveV1): void {
+function validateArchiveRelationships(archive: OpenSubListsArchiveV2): void {
   const categoryIds = assertUniqueIds(archive.categories, "categories");
   const paymentMethodIds = assertUniqueIds(archive.paymentMethods, "paymentMethods");
   assertUniqueIds(archive.subscriptions, "subscriptions");
@@ -887,7 +1067,7 @@ function importValidation(path: string, code: string): ApplicationError {
 }
 
 function validateCategoryNameConflicts(
-  archive: OpenSubListsArchiveV1,
+  archive: OpenSubListsArchiveV2,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): void {
@@ -917,7 +1097,7 @@ function unknownTopLevelWarnings(source: Record<string, unknown>) {
     }));
 }
 
-async function archiveDigest(archive: OpenSubListsArchiveV1): Promise<string> {
+async function archiveDigest(archive: OpenSubListsArchiveV2): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(archive));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return `sha256-${[...new Uint8Array(digest)]
@@ -926,7 +1106,7 @@ async function archiveDigest(archive: OpenSubListsArchiveV1): Promise<string> {
 }
 
 function createDuplicateIdMaps(
-  archive: OpenSubListsArchiveV1,
+  archive: OpenSubListsArchiveV2,
   strategy: "skip" | "overwrite" | "duplicate",
 ) {
   return {

@@ -35,7 +35,7 @@ describe("next billing occurrence", () => {
     ["every three months", rule("2026-01-31", "month", 3), "2026-04-01", "2026-04-30"],
     ["leap-day yearly", rule("2024-02-29", "year"), "2025-02-01", "2025-02-28"],
     ["leap-day after occurrence", rule("2024-02-29", "year"), "2025-03-01", "2026-02-28"],
-    ["future anchor", rule("2026-12-01", "month"), "2026-08-23", "2026-12-01"],
+    ["known future anchor", rule("2026-12-01", "month"), "2026-08-23", "2026-09-01"],
   ])("handles %s", (_name, recurrence, today, expected) => {
     expect(nextOccurrenceOnOrAfter(recurrence, today)).toBe(expected);
   });
@@ -52,6 +52,7 @@ describe("next billing occurrence", () => {
     expect(occurrenceAt(recurrence, 1)).toBe("2026-02-28");
     expect(occurrenceAt(recurrence, 2)).toBe("2026-03-31");
     expect(occurrenceAt(recurrence, 3)).toBe("2026-04-30");
+    expect(occurrenceAt(recurrence, -1)).toBe("2025-12-31");
   });
 
   it("restores February 29 in later leap years", () => {
@@ -77,8 +78,10 @@ describe("occurrence projection", () => {
     ]);
   });
 
-  it("returns an empty projection when the anchor is after the window", () => {
-    expect(projectOccurrences(rule("2026-12-01", "month"), "2026-08-01", "2026-08-31")).toEqual([]);
+  it("projects backward from an anchor that is any known occurrence", () => {
+    expect(projectOccurrences(rule("2026-12-01", "month"), "2026-08-01", "2026-08-31")).toEqual([
+      "2026-08-01",
+    ]);
   });
 
   it("returns the final supported occurrence without advancing past year 9999", () => {
