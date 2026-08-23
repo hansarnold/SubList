@@ -332,7 +332,7 @@ MVP limits:
 - Archive size: 5 MiB.
 - Categories: 100.
 - Payment methods: 100.
-- Subscriptions: 500.
+- Subscriptions: 50.
 - Notes: 10,000 Unicode code points per subscription.
 
 The importer compiles validated changes into a bounded D1 batch transaction. Any failed statement rolls back the entire import.
@@ -352,22 +352,22 @@ If future limits exceed practical batch constraints, imports should move to a re
 
 Migration from the native SubList application is an adapter into the OpenSubLists V1 intermediate archive, not a special database writer.
 
-Expected mappings based on the current native application model:
+Expected mappings based on the current SubList application model:
 
-| Native concept | OpenSubLists V1 |
-| --- | --- |
-| Subscription | Subscription |
-| Category | Category |
-| Payment method | Payment method |
-| Billing amount and currency | `amount` and `currency` |
-| Billing interval and unit | `recurrence` |
-| Website and notes | Same fields |
-| Archived state | `archivedAt` when representable |
-| Pause history | Warning; not imported in V1 |
-| Price history | Warning; current amount only |
-| Trial or introductory offer | Warning; base recurring subscription only |
-| Custom icons and backgrounds | Warning; not imported |
-| Native reminder settings | Warning; reminder rules are outside V1 |
+| Native concept               | OpenSubLists V1                           |
+| ---------------------------- | ----------------------------------------- |
+| Subscription                 | Subscription                              |
+| Category                     | Category                                  |
+| Payment method               | Payment method                            |
+| Billing amount and currency  | `amount` and `currency`                   |
+| Billing interval and unit    | `recurrence`                              |
+| Website and notes            | Same fields                               |
+| Archived state               | `archivedAt` when representable           |
+| Pause history                | Warning; not imported in V1               |
+| Price history                | Warning; current amount only              |
+| Trial or introductory offer  | Warning; base recurring subscription only |
+| Custom icons and backgrounds | Warning; not imported                     |
+| Native reminder settings     | Warning; reminder rules are outside V1    |
 
 Implementation requires a redacted real export fixture. Field mappings must not be guessed from the native database when a supported JSON export is available.
 

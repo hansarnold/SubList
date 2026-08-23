@@ -29,14 +29,14 @@ The MVP is one deployable Worker plus one D1 database per environment. Worker co
 
 ## 2. Language Choices
 
-| Layer | Choice |
-| --- | --- |
-| D1 schema and migrations | SQL using SQLite semantics |
-| D1 queries | Parameterized SQL |
-| Worker and API | TypeScript |
-| Domain logic | Runtime-independent TypeScript |
-| Frontend | React with TypeScript/TSX |
-| Runtime configuration | `wrangler.jsonc` |
+| Layer                    | Choice                         |
+| ------------------------ | ------------------------------ |
+| D1 schema and migrations | SQL using SQLite semantics     |
+| D1 queries               | Parameterized SQL              |
+| Worker and API           | TypeScript                     |
+| Domain logic             | Runtime-independent TypeScript |
+| Frontend                 | React with TypeScript/TSX      |
+| Runtime configuration    | `wrangler.jsonc`               |
 
 TypeScript is the single application language so frontend previews, API schemas, and domain types can share definitions without maintaining a second implementation.
 
@@ -47,7 +47,7 @@ TypeScript is the single application language so frontend previews, API schemas,
 - Cloudflare Workers module syntax.
 - Vite with the Cloudflare Vite plugin.
 - Wrangler for local development, generated runtime types, migrations, and deployment.
-- Node.js 24 LTS is selected for the initial scaffold and is pinned in repository metadata when the project is created.
+- Node.js 24 LTS is pinned in repository metadata.
 - pnpm is the package manager, with a committed lockfile.
 
 Exact package versions are pinned in `package.json`; planning documents do not duplicate version numbers that will become stale.
@@ -56,7 +56,7 @@ Exact package versions are pinned in `package.json`; planning documents do not d
 
 - React.
 - React Router.
-- CSS Modules and CSS custom properties for styling and design tokens.
+- Plain CSS and CSS custom properties for styling and design tokens.
 - No large UI framework in the MVP.
 - UI copy is routed through a localization layer from the beginning.
 
@@ -86,7 +86,7 @@ The MVP does not use an ORM. The schema has few tables, uses composite tenant ke
 
 - Vitest for pure domain and application tests.
 - A Workers-compatible integration environment for D1 and request tests.
-- Browser end-to-end tests for the critical sign-in-independent UI flows using injected test identity.
+- Browser-based QA for critical sign-in-independent UI flows using the loopback-only development identity.
 - SQL schema smoke tests against local D1 and SQLite where semantics overlap.
 
 ## 4. Dependency Direction
@@ -237,14 +237,14 @@ No environment binding is read directly from domain modules.
 
 Revisit these decisions only with concrete evidence:
 
-| Decision | Revisit when |
-| --- | --- |
-| One Worker | Background work affects latency, permissions, or deployment isolation |
-| No ORM | Mapping or migration boilerplate becomes a measured maintenance problem |
-| No Queue | Delivery volume or retry requirements exceed direct scheduled work |
-| No R2 | User-uploaded images become an approved feature |
-| User as tenant | Shared subscriptions or family accounts become an approved feature |
-| No API pagination | An account can exceed the documented 500-subscription limit |
+| Decision          | Revisit when                                                             |
+| ----------------- | ------------------------------------------------------------------------ |
+| One Worker        | Background work affects latency, permissions, or deployment isolation    |
+| No ORM            | Mapping or migration boilerplate becomes a measured maintenance problem  |
+| No Queue          | Delivery volume or retry requirements exceed direct scheduled work       |
+| No R2             | User-uploaded images become an approved feature                          |
+| User as tenant    | Shared subscriptions or family accounts become an approved feature       |
+| No API pagination | An account needs more than the documented 50-subscription personal limit |
 
 ## 13. Official References
 

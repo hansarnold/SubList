@@ -2,7 +2,7 @@
 
 > Status: MVP information architecture and interaction plan  
 > Last updated: 2026-08-23  
-> Targets: Mobile and desktop web browsers
+> Targets: Narrow and wide web-browser viewports
 
 ## 1. Product Experience Goals
 
@@ -10,7 +10,7 @@
 - Make adding a subscription faster than maintaining a spreadsheet.
 - Keep cancellation, archiving, and permanent deletion clearly distinct.
 - Present multiple currencies without misleading combined totals.
-- Work comfortably on a phone while retaining an efficient desktop list.
+- Work comfortably on a phone while retaining an efficient wide-browser list.
 - Keep advanced recurrence behavior available without overwhelming the default form.
 
 ## 2. Authentication Boundary
@@ -44,7 +44,7 @@ Application behavior:
 
 ## 4. Responsive Navigation
 
-### Desktop
+### Wide Browser
 
 - Persistent left sidebar.
 - Primary items: Overview, Subscriptions, Settings.
@@ -80,7 +80,7 @@ The user may skip display-name entry. The application does not block first use o
 4. Category breakdown.
 5. Recent or newly added subscriptions when useful.
 
-At desktop widths, the upcoming-charge agenda is the dominant content area. Summary information supports the agenda rather than competing with it as a dense analytics dashboard.
+At wide browser widths, the upcoming-charge agenda is the dominant content area. Summary information supports the agenda rather than competing with it as a dense analytics dashboard.
 
 ## 6.2 Multiple Currencies
 
@@ -94,7 +94,7 @@ JPY  ¥1,200 monthly estimate
 
 The UI must not show one grand total until exchange-rate conversion is implemented and clearly labeled.
 
-Monthly estimates are the default desktop presentation. Annualized estimates remain available through a compact Monthly/Annual control or equivalent disclosure without changing the currency-separation rule.
+Monthly estimates are the default wide-browser presentation. Annualized estimates remain available through a compact Monthly/Annual control or equivalent disclosure without changing the currency-separation rule.
 
 ## 6.3 Upcoming Charges
 
@@ -134,9 +134,9 @@ Display:
 
 Filters are represented in URL search parameters and survive refresh. A Clear Filters action appears only when filters differ from defaults.
 
-## 7.3 Desktop Presentation
+## 7.3 Wide-Browser Presentation
 
-Use a responsive card grid by default at comfortable desktop widths. Provide an optional compact list view for users who prefer higher density. Both views include:
+Use a responsive card grid by default at comfortable wide-browser widths. Provide an optional compact list view for users who prefer higher density. Both views include:
 
 - Service.
 - Amount and interval.
@@ -370,9 +370,9 @@ Use the same not-found presentation for absent resources and resources owned by 
 
 ![Selected OpenSubLists dashboard web prototype](./assets/open-sublists-dashboard-prototype-web.png)
 
-This image is the selected visual reference for the authenticated desktop-width `/dashboard` route. It establishes:
+This image is the selected visual reference for the authenticated wide-browser `/dashboard` route. It establishes:
 
-- The same browser-native application shell, persistent navigation, typography, spacing, surface treatment, and Add Subscription action used by the selected Subscriptions prototype.
+- The same responsive web application shell, persistent navigation, typography, spacing, surface treatment, and Add Subscription action used by the selected Subscriptions prototype.
 - `Overview` as the visible localized English label for the Dashboard route.
 - A next-charge summary and a separate 30-day amount for each currency, with no combined cross-currency total.
 - A 30-day renewal agenda as the dominant content area, with a secondary 7-day view.
@@ -385,9 +385,9 @@ The image is directional rather than normative. Its product names, icons, amount
 
 ![Selected OpenSubLists subscriptions web prototype](./assets/open-sublists-subscriptions-prototype-web.png)
 
-This image is the selected visual reference for the authenticated desktop-width `/subscriptions` route. It establishes:
+This image is the selected visual reference for the authenticated wide-browser `/subscriptions` route. It establishes:
 
-- A browser-native application shell with persistent navigation and one prominent Add Subscription action.
+- A responsive web application shell with persistent navigation and one prominent Add Subscription action.
 - Search, next-billing sorting, and grid/list display controls in the page header.
 - Separate monthly estimates for each currency with no combined cross-currency total.
 - Status, category, payment-method, and currency filters above the result set.

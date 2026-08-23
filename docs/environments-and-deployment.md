@@ -8,11 +8,11 @@
 
 The project uses three isolated environments.
 
-| Environment | Purpose | Worker | D1 | Authentication |
-| --- | --- | --- | --- | --- |
-| Local | Development and tests | Local Wrangler runtime | Local D1 files | Fixed local development identity |
-| Preview | Integration and release verification | Preview Worker | Preview D1 database | Cloudflare Access OTP |
-| Production | Real user data | Production Worker | Production D1 database | Cloudflare Access OTP |
+| Environment | Purpose                              | Worker                 | D1                     | Authentication                   |
+| ----------- | ------------------------------------ | ---------------------- | ---------------------- | -------------------------------- |
+| Local       | Development and tests                | Local Wrangler runtime | Local D1 files         | Fixed local development identity |
+| Preview     | Integration and release verification | Preview Worker         | Preview D1 database    | Cloudflare Access OTP            |
+| Production  | Real user data                       | Production Worker      | Production D1 database | Cloudflare Access OTP            |
 
 Preview and production never share a D1 database, Access application audience, route, or secrets.
 
@@ -22,19 +22,23 @@ Use one `wrangler.jsonc` with explicit environment sections. Bindings retain the
 
 Required bindings and variables:
 
-| Name | Kind | Purpose |
-| --- | --- | --- |
-| `DB` | D1 binding | Environment-specific database |
-| `ENVIRONMENT` | Plain variable | `local`, `preview`, or `production` |
-| `PUBLIC_ORIGIN` | Plain variable | Exact allowed browser origin |
-| `TEAM_DOMAIN` | Plain variable | Cloudflare Access team domain |
-| `POLICY_AUD` | Plain variable | Access application audience |
+| Name            | Kind           | Purpose                             |
+| --------------- | -------------- | ----------------------------------- |
+| `DB`            | D1 binding     | Environment-specific database       |
+| `ENVIRONMENT`   | Plain variable | `local`, `preview`, or `production` |
+| `PUBLIC_ORIGIN` | Plain variable | Exact allowed browser origin        |
+| `TEAM_DOMAIN`   | Plain variable | Cloudflare Access team domain       |
+| `POLICY_AUD`    | Plain variable | Access application audience         |
 
 Future email provider keys and import-signing secrets, if any, use encrypted Worker secrets rather than plain variables.
 
 ## 3. Local Authentication
 
 Local development must not depend on Cloudflare Access.
+
+The complete website runs locally through the Cloudflare Vite plugin. The browser UI, Worker API, and D1 emulator share one origin and one persistent `.wrangler/state` directory. `pnpm dev` first runs `pnpm db:migrate:local`, so the local schema is always advanced by the same numbered migrations used remotely.
+
+Both `pnpm dev` and `pnpm preview` bind only to `http://localhost:5173`. This keeps the fixed development identity on a loopback-only origin while supporting a production-shaped local build.
 
 The local auth adapter returns a fixed identity configured through local-only values:
 
@@ -51,6 +55,16 @@ Safety requirements:
 - Preview and production fail startup or fail requests closed if local auth configuration is detected.
 - Production code contains no request header that can select or impersonate an arbitrary user.
 - Multi-user authorization tests inject an authentication context through the test harness rather than a deployed HTTP backdoor.
+
+Normal local workflow:
+
+```text
+corepack enable
+pnpm install
+pnpm dev
+```
+
+No Cloudflare account, remote D1 database, or Access configuration is required for this workflow.
 
 ## 4. Cloudflare Access Configuration
 
@@ -93,7 +107,8 @@ Migration files are numbered and immutable after deployment:
 ```text
 migrations/
   0001_initial.sql
-  0002_add_example.sql
+  0002_resource_limits.sql
+  0003_reduce_subscription_limit.sql
 ```
 
 Migration workflow:

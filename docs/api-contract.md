@@ -72,7 +72,7 @@ Successful list response:
 }
 ```
 
-The MVP returns at most 500 subscriptions per user and does not implement pagination. The response envelope permits cursor metadata to be added later without changing the top-level shape.
+The personal MVP returns at most 50 subscriptions per user and does not implement pagination. This keeps the fully expanded 30-day agenda within the Cloudflare Workers Free CPU and response-size budget. The response envelope permits cursor metadata to be added later without changing the top-level shape.
 
 ## 5. Error Shape
 
@@ -97,16 +97,16 @@ Error messages are safe for users and must not include SQL, stack traces, JWTs, 
 
 Common codes:
 
-| HTTP | Code | Meaning |
-| --- | --- | --- |
-| 400 | `INVALID_JSON` | Malformed JSON body |
-| 401 | `UNAUTHENTICATED` | Missing, expired, or invalid Access token |
-| 404 | `NOT_FOUND` | Resource absent or not owned by current user |
-| 409 | `CONFLICT` | Unique-name or state-transition conflict |
-| 413 | `PAYLOAD_TOO_LARGE` | Request exceeds configured limit |
-| 422 | `VALIDATION_ERROR` | Structurally valid JSON with invalid fields |
-| 429 | `RATE_LIMITED` | Request rate exceeded |
-| 500 | `INTERNAL_ERROR` | Unexpected server error |
+| HTTP | Code                | Meaning                                      |
+| ---- | ------------------- | -------------------------------------------- |
+| 400  | `INVALID_JSON`      | Malformed JSON body                          |
+| 401  | `UNAUTHENTICATED`   | Missing, expired, or invalid Access token    |
+| 404  | `NOT_FOUND`         | Resource absent or not owned by current user |
+| 409  | `CONFLICT`          | Unique-name or state-transition conflict     |
+| 413  | `PAYLOAD_TOO_LARGE` | Request exceeds configured limit             |
+| 422  | `VALIDATION_ERROR`  | Structurally valid JSON with invalid fields  |
+| 429  | `RATE_LIMITED`      | Request rate exceeded                        |
+| 500  | `INTERNAL_ERROR`    | Unexpected server error                      |
 
 ## 6. Data Types
 
@@ -309,16 +309,16 @@ Atomically clears the payment method from the current user's subscriptions and d
 
 Optional query parameters:
 
-| Parameter | Values |
-| --- | --- |
-| `q` | Case-insensitive name search |
-| `status` | `active`, `cancelled`, or omitted |
-| `archived` | `exclude` default, `only`, or `include` |
-| `categoryId` | Category UUID or `none` |
-| `paymentMethodId` | Payment method UUID or `none` |
-| `currency` | Uppercase ISO 4217 code |
-| `sort` | `nextBillingOn` default, `name`, `amount`, or `createdAt` |
-| `order` | `asc` default or `desc` |
+| Parameter         | Values                                                    |
+| ----------------- | --------------------------------------------------------- |
+| `q`               | Case-insensitive name search                              |
+| `status`          | `active`, `cancelled`, or omitted                         |
+| `archived`        | `exclude` default, `only`, or `include`                   |
+| `categoryId`      | Category UUID or `none`                                   |
+| `paymentMethodId` | Payment method UUID or `none`                             |
+| `currency`        | Uppercase ISO 4217 code                                   |
+| `sort`            | `nextBillingOn` default, `name`, `amount`, or `createdAt` |
+| `order`           | `asc` default or `desc`                                   |
 
 The server reconciles stale next-billing values before producing the final response.
 
@@ -391,7 +391,7 @@ Permanently deletes the subscription after a UI confirmation. Returns `204 No Co
 
 Optional query parameter:
 
-- `upcomingDays`: integer from 1 to 365, default 30.
+- `upcomingDays`: integer from 1 to 30, default 30.
 
 Response shape:
 
@@ -458,7 +458,7 @@ Validates an archive without writing business data and returns:
 
 Confirms an import by uploading the archive again with its expected digest, an explicit conflict strategy, and `confirmed: true`. The server repeats validation and rejects a digest mismatch.
 
-The MVP may defer import implementation, but the route and archive format are reserved now.
+The MVP implements this route atomically with the selected conflict strategy and per-user resource limits.
 
 ## 14. Request Limits
 
@@ -469,6 +469,7 @@ Initial limits:
 - Name: 120 Unicode code points for subscriptions; 80 for categories and payment methods.
 - Import archive: 5 MiB.
 - Search string: 120 Unicode code points.
+- Per user: 100 categories, 100 payment methods, and 50 subscriptions.
 
 Limits are enforced before expensive parsing or database work where practical.
 

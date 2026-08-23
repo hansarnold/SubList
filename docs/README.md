@@ -2,7 +2,7 @@
 
 > Last updated: 2026-08-23
 
-This directory is the authoritative pre-implementation specification for OpenSubLists.
+This directory is the authoritative product, implementation, and operations specification for OpenSubLists.
 
 ## Reading Order
 
@@ -14,7 +14,7 @@ This directory is the authoritative pre-implementation specification for OpenSub
 6. [MVP UI Flow](./ui-flow.md) — Routes, responsive behavior, forms, lifecycle interactions, accessibility, and the selected Dashboard and Subscriptions visual references.
 7. [Import and Export](./import-export.md) — Versioned archive format, preview, conflicts, and native SubList migration.
 8. [Environments and Deployment](./environments-and-deployment.md) — Local, preview, production, migrations, CI, deployment, and recovery.
-9. [Pre-implementation Checklist](./pre-implementation-checklist.md) — Evidence that planning gates are covered before scaffolding.
+9. [Implementation Readiness Checklist](./pre-implementation-checklist.md) — Completed local gates and remaining hosted-deployment inputs.
 
 ## Authority Rules
 
@@ -36,9 +36,8 @@ Agent-facing planning, implementation notes, architecture documents, and code co
 
 ## Deferred Inputs
 
-The following are implementation inputs rather than unresolved MVP architecture:
+The following are hosted-deployment or future-adapter inputs rather than unresolved MVP architecture:
 
 - Cloudflare account-specific IDs, hostnames, and Access audience values.
-- Exact pinned package versions selected during scaffolding.
 - A redacted native SubList JSON export fixture for the migration adapter.
 - Reminder and exchange-rate provider selection, because those features are outside the MVP.

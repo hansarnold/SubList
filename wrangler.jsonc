@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "open-sublists",
+  "main": "./src/worker/index.ts",
+  "workers_dev": false,
+  "compatibility_date": "2026-08-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+    },
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "PUBLIC_ORIGIN": "http://localhost:5173",
+    "TEAM_DOMAIN": "local.invalid",
+    "POLICY_AUD": "local-development",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "open-sublists-local",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "env": {
+    "preview": {
+      "name": "open-sublists-preview",
+      "workers_dev": false,
+      "vars": {
+        "ENVIRONMENT": "preview",
+        "PUBLIC_ORIGIN": "https://preview.example.invalid",
+        "TEAM_DOMAIN": "example.cloudflareaccess.com",
+        "POLICY_AUD": "replace-with-preview-access-audience",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "open-sublists-preview",
+          "migrations_dir": "migrations",
+        },
+      ],
+    },
+    "production": {
+      "name": "open-sublists-production",
+      "workers_dev": false,
+      "vars": {
+        "ENVIRONMENT": "production",
+        "PUBLIC_ORIGIN": "https://subscriptions.example.invalid",
+        "TEAM_DOMAIN": "example.cloudflareaccess.com",
+        "POLICY_AUD": "replace-with-production-access-audience",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "open-sublists-production",
+          "migrations_dir": "migrations",
+        },
+      ],
+    },
+  },
+}

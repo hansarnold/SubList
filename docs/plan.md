@@ -1,9 +1,12 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: Pre-implementation plan  
-> Last updated: 2026-08-23  
-> Deployment target: Cloudflare  
-> Current phase: Planning complete; ready for project scaffolding
+> Status: Local MVP implemented; hosted deployment pending
+>
+> Last updated: 2026-08-23
+>
+> Deployment target: Cloudflare
+>
+> Current phase: Phase 1 complete; preparing the first private Cloudflare deployment
 
 ## 1. Project Overview
 
@@ -48,7 +51,7 @@ Sign in → Review subscriptions → Add or edit → Review upcoming charges and
 - Separate summaries for each currency.
 - Default currency and time-zone settings.
 - JSON import and export.
-- Responsive layouts for mobile and desktop browsers.
+- One responsive website for narrow and wide browser viewports.
 
 ### 3.2 Excluded from the MVP
 
@@ -189,7 +192,7 @@ Billing dates are local calendar dates. The next occurrence is inclusive of loca
 
 ## 10. Pages and User Flows
 
-The MVP includes Dashboard, Subscriptions, and Settings. It uses desktop sidebar navigation and mobile bottom navigation. The visible English label for the Dashboard route is Overview. Its desktop view prioritizes the next charge and a grouped 30-day renewal agenda, followed by separate per-currency estimates and a count-based category summary. The desktop Subscriptions route uses a responsive card grid by default with an optional compact list view, plus search, sorting, and tenant-scoped filters. Create and edit forms prioritize name, amount, frequency, and billing anchor while placing end-of-month behavior and notes behind progressive disclosure.
+The MVP is a responsive website only; there are no native macOS or iOS clients. It includes Dashboard, Subscriptions, and Settings. It uses sidebar navigation at wide browser widths and bottom navigation at narrow widths. The visible English label for the Dashboard route is Overview. Its wide-browser view prioritizes the next charge and a grouped 30-day renewal agenda, followed by separate per-currency estimates and a count-based category summary. The wide-browser Subscriptions route uses a responsive card grid by default with an optional compact list view, plus search, sorting, and tenant-scoped filters. Create and edit forms prioritize name, amount, frequency, and billing anchor while placing end-of-month behavior and notes behind progressive disclosure.
 
 Responsive behavior, lifecycle actions, accessibility, localization, empty states, and acceptance flows are defined in [MVP UI Flow](./ui-flow.md).
 
@@ -220,37 +223,39 @@ Module boundaries and tool choices are defined in [Architecture and Technology D
 - [x] Define the Access, session, caching, and tenant-isolation model.
 - [x] Finalize the migration-ready data model and DDL proposal.
 - [x] Define API, UI, import/export, environment, and deployment contracts.
-- [x] Select consistent desktop visual targets for Dashboard and Subscriptions.
+- [x] Select consistent wide-browser visual targets for Dashboard and Subscriptions.
 
 Completion criterion: No blocking ambiguity remains in the data model or critical business rules.
 
-### Phase 1: Locally Usable Version
+### Phase 1: Locally Usable Version — Complete
 
-- Create the Worker, React, and D1 project.
-- Implement database migrations.
-- Add a development identity provider and production Access JWT validation.
-- Implement subscription CRUD, categories, and payment methods.
-- Complete the responsive list and edit form.
-- Implement the basic dashboard.
+- [x] Create the Worker, React, and D1 project.
+- [x] Implement database migrations and atomic per-user resource limits.
+- [x] Add a loopback-only development identity and production Access JWT validation.
+- [x] Implement subscription CRUD, lifecycle actions, categories, and payment methods.
+- [x] Complete the responsive list, detail, and edit flows.
+- [x] Implement the dashboard, JSON import/export, and per-currency reporting.
+- [x] Add domain tests and Worker/D1 integration coverage.
 
 Completion criterion: The maintainer can manage all subscriptions locally.
 
-### Phase 2: Private Cloudflare Deployment
+### Phase 2: Private Cloudflare Deployment — In Progress
 
-- Deploy the Worker and D1 database.
-- Configure Access OTP and the email allowlist.
-- Prevent public entry points from bypassing Access.
-- Add logging, error handling, and backup documentation.
-- Complete JSON export.
+- [ ] Create and deploy the preview and production D1 databases and Worker environments.
+- [ ] Configure Access OTP, the email allowlist, and real audience values.
+- [x] Prevent public entry points and accidental local-auth configuration from bypassing Access.
+- [x] Add structured logging, stable error handling, and backup documentation.
+- [x] Complete portable JSON import and export.
 
 Completion criterion: The maintainer can use the application reliably, and accounts cannot access one another's data.
 
 ### Phase 3: Friend Preview
 
-- Add first-run guidance.
-- Improve empty states, error messages, and mobile behavior.
+- [ ] Add first-run setup guidance.
+- [x] Improve empty states, error messages, and mobile behavior.
 - Obtain a redacted native SubList JSON sample.
-- Add JSON import and SubList migration.
+- [x] Add versioned OpenSubLists JSON import.
+- [ ] Add the native SubList migration adapter after receiving a redacted fixture.
 - Invite a small group and collect feedback.
 
 Completion criterion: A new user can record their first subscription without developer guidance.
@@ -286,7 +291,7 @@ Completion criterion: A new user can record their first subscription without dev
 
 ## 17. Open Decisions
 
-The following do not block the initial project scaffold:
+The following do not block the first hosted deployment:
 
 1. A redacted native SubList JSON export is still required before its adapter can be finalized.
 2. The first reminder channel remains deferred until reminders enter the approved scope.
@@ -312,6 +317,8 @@ The following do not block the initial project scaffold:
 - Pause periods and price history are deferred to dedicated tables.
 - The API base path is `/api/v1`.
 - The Dashboard API returns projected occurrence records, not subscription rows, so short recurrence intervals are counted correctly.
+- The personal MVP caps each account at 50 subscriptions and dashboard occurrence expansion at a 30-day window.
+- The product is one responsive website; native desktop and mobile clients are outside the MVP.
 - Initial UI locales are English and Simplified Chinese.
 - Date rules and tenant isolation require automated tests before substantial UI development.
 

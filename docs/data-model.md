@@ -106,16 +106,16 @@ All tenant-owned primary and foreign keys include `user_id`.
 
 Stores the stable application account and user preferences.
 
-| Column | Type | Null | Description |
-| --- | --- | --- | --- |
-| id | TEXT | No | UUID primary key |
-| primary_email | TEXT | No | Last verified display email |
-| email_normalized | TEXT | No | Trimmed, lowercased identity key; unique |
-| display_name | TEXT | Yes | Optional display name |
-| timezone | TEXT | No | IANA time zone, default `UTC` |
-| default_currency | TEXT | No | Uppercase ISO 4217 code, default `USD` |
-| created_at | INTEGER | No | Unix epoch milliseconds |
-| updated_at | INTEGER | No | Unix epoch milliseconds |
+| Column           | Type    | Null | Description                              |
+| ---------------- | ------- | ---- | ---------------------------------------- |
+| id               | TEXT    | No   | UUID primary key                         |
+| primary_email    | TEXT    | No   | Last verified display email              |
+| email_normalized | TEXT    | No   | Trimmed, lowercased identity key; unique |
+| display_name     | TEXT    | Yes  | Optional display name                    |
+| timezone         | TEXT    | No   | IANA time zone, default `UTC`            |
+| default_currency | TEXT    | No   | Uppercase ISO 4217 code, default `USD`   |
+| created_at       | INTEGER | No   | Unix epoch milliseconds                  |
+| updated_at       | INTEGER | No   | Unix epoch milliseconds                  |
 
 Notes:
 
@@ -127,15 +127,15 @@ Notes:
 
 Maps an external authenticated identity to a stable application user.
 
-| Column | Type | Null | Description |
-| --- | --- | --- | --- |
-| provider | TEXT | No | `cloudflare_access`, or `local_development` in local environments only |
-| subject | TEXT | No | Provider-stable subject, Access JWT `sub` |
-| user_id | TEXT | No | Stable application user |
-| email | TEXT | No | Email asserted by the provider |
-| email_normalized | TEXT | No | Normalized asserted email |
-| created_at | INTEGER | No | First observed time |
-| last_seen_at | INTEGER | No | Most recent successful authentication |
+| Column           | Type    | Null | Description                                                            |
+| ---------------- | ------- | ---- | ---------------------------------------------------------------------- |
+| provider         | TEXT    | No   | `cloudflare_access`, or `local_development` in local environments only |
+| subject          | TEXT    | No   | Provider-stable subject, Access JWT `sub`                              |
+| user_id          | TEXT    | No   | Stable application user                                                |
+| email            | TEXT    | No   | Email asserted by the provider                                         |
+| email_normalized | TEXT    | No   | Normalized asserted email                                              |
+| created_at       | INTEGER | No   | First observed time                                                    |
+| last_seen_at     | INTEGER | No   | Most recent successful authentication                                  |
 
 Primary key: `(provider, subject)`.
 
@@ -151,16 +151,16 @@ Because email-based OTP proves control of the approved mailbox, verified-email r
 
 ## 4.3 categories
 
-| Column | Type | Null | Description |
-| --- | --- | --- | --- |
-| user_id | TEXT | No | Owning user |
-| id | TEXT | No | UUID resource ID |
-| name | TEXT | No | Display name |
-| name_key | TEXT | No | Trimmed and normalized uniqueness key |
-| color | TEXT | No | `#RRGGBB` display color |
-| position | INTEGER | No | Manual ordering value, default `0` |
-| created_at | INTEGER | No | Unix epoch milliseconds |
-| updated_at | INTEGER | No | Unix epoch milliseconds |
+| Column     | Type    | Null | Description                           |
+| ---------- | ------- | ---- | ------------------------------------- |
+| user_id    | TEXT    | No   | Owning user                           |
+| id         | TEXT    | No   | UUID resource ID                      |
+| name       | TEXT    | No   | Display name                          |
+| name_key   | TEXT    | No   | Trimmed and normalized uniqueness key |
+| color      | TEXT    | No   | `#RRGGBB` display color               |
+| position   | INTEGER | No   | Manual ordering value, default `0`    |
+| created_at | INTEGER | No   | Unix epoch milliseconds               |
+| updated_at | INTEGER | No   | Unix epoch milliseconds               |
 
 Primary key: `(user_id, id)`.
 
@@ -168,16 +168,16 @@ Primary key: `(user_id, id)`.
 
 ## 4.4 payment_methods
 
-| Column | Type | Null | Description |
-| --- | --- | --- | --- |
-| user_id | TEXT | No | Owning user |
-| id | TEXT | No | UUID resource ID |
-| name | TEXT | No | Display name, such as `Visa` or `Apple` |
-| kind | TEXT | No | `card`, `wallet`, `bank`, `store`, or `other` |
-| label | TEXT | Yes | Optional safe label, such as `•••• 1234` |
-| position | INTEGER | No | Manual ordering value, default `0` |
-| created_at | INTEGER | No | Unix epoch milliseconds |
-| updated_at | INTEGER | No | Unix epoch milliseconds |
+| Column     | Type    | Null | Description                                   |
+| ---------- | ------- | ---- | --------------------------------------------- |
+| user_id    | TEXT    | No   | Owning user                                   |
+| id         | TEXT    | No   | UUID resource ID                              |
+| name       | TEXT    | No   | Display name, such as `Visa` or `Apple`       |
+| kind       | TEXT    | No   | `card`, `wallet`, `bank`, `store`, or `other` |
+| label      | TEXT    | Yes  | Optional safe label, such as `•••• 1234`      |
+| position   | INTEGER | No   | Manual ordering value, default `0`            |
+| created_at | INTEGER | No   | Unix epoch milliseconds                       |
+| updated_at | INTEGER | No   | Unix epoch milliseconds                       |
 
 Primary key: `(user_id, id)`.
 
@@ -185,27 +185,27 @@ The application never stores a full card number, bank credential, or payment sec
 
 ## 4.5 subscriptions
 
-| Column | Type | Null | Description |
-| --- | --- | --- | --- |
-| user_id | TEXT | No | Owning user |
-| id | TEXT | No | UUID resource ID |
-| name | TEXT | No | Subscription name |
-| amount_micros | INTEGER | No | Non-negative integer micro-units |
-| currency | TEXT | No | Uppercase ISO 4217 code |
-| recurrence_unit | TEXT | No | `day`, `week`, `month`, or `year` |
-| recurrence_count | INTEGER | No | Positive unit multiplier, default `1` |
-| billing_anchor_on | TEXT | No | Known billing occurrence in `YYYY-MM-DD` form |
-| anchor_mode | TEXT | No | `calendar_day` or `end_of_month` |
-| next_billing_on | TEXT | Yes | Server-maintained next occurrence |
-| status | TEXT | No | `active` or `cancelled` |
-| cancelled_at | INTEGER | Yes | Time cancellation was recorded |
-| archived_at | INTEGER | Yes | Time the record was archived |
-| category_id | TEXT | Yes | Optional same-user category |
-| payment_method_id | TEXT | Yes | Optional same-user payment method |
-| website_url | TEXT | Yes | Optional HTTPS or HTTP URL |
-| notes | TEXT | Yes | Optional user notes |
-| created_at | INTEGER | No | Unix epoch milliseconds |
-| updated_at | INTEGER | No | Unix epoch milliseconds |
+| Column            | Type    | Null | Description                                   |
+| ----------------- | ------- | ---- | --------------------------------------------- |
+| user_id           | TEXT    | No   | Owning user                                   |
+| id                | TEXT    | No   | UUID resource ID                              |
+| name              | TEXT    | No   | Subscription name                             |
+| amount_micros     | INTEGER | No   | Non-negative integer micro-units              |
+| currency          | TEXT    | No   | Uppercase ISO 4217 code                       |
+| recurrence_unit   | TEXT    | No   | `day`, `week`, `month`, or `year`             |
+| recurrence_count  | INTEGER | No   | Positive unit multiplier, default `1`         |
+| billing_anchor_on | TEXT    | No   | Known billing occurrence in `YYYY-MM-DD` form |
+| anchor_mode       | TEXT    | No   | `calendar_day` or `end_of_month`              |
+| next_billing_on   | TEXT    | Yes  | Server-maintained next occurrence             |
+| status            | TEXT    | No   | `active` or `cancelled`                       |
+| cancelled_at      | INTEGER | Yes  | Time cancellation was recorded                |
+| archived_at       | INTEGER | Yes  | Time the record was archived                  |
+| category_id       | TEXT    | Yes  | Optional same-user category                   |
+| payment_method_id | TEXT    | Yes  | Optional same-user payment method             |
+| website_url       | TEXT    | Yes  | Optional HTTPS or HTTP URL                    |
+| notes             | TEXT    | Yes  | Optional user notes                           |
+| created_at        | INTEGER | No   | Unix epoch milliseconds                       |
+| updated_at        | INTEGER | No   | Unix epoch milliseconds                       |
 
 Primary key: `(user_id, id)`.
 
@@ -372,6 +372,8 @@ CREATE INDEX idx_subscriptions_payment_method
 ```
 
 All MVP tables use SQLite `STRICT` mode so that stored values cannot silently drift away from the declared D1 types. The visible-list and upcoming-charge indexes serve different filters. Their final column order should be checked with actual query plans after representative data is available.
+
+Migration `0002_resource_limits.sql` adds per-user `BEFORE INSERT` guard triggers for 100 categories, 100 payment methods, and the original 500-subscription limit. Migration `0003_reduce_subscription_limit.sql` replaces only the subscription trigger and lowers that limit to 50 without rewriting an applied migration. These triggers make the no-pagination boundary atomic even when normal creates and import confirmations overlap. They contain no recurrence or calendar logic. The active 50-subscription limit and 30-day dashboard window also bound occurrence expansion for the Workers Free CPU budget.
 
 ## 6. Ownership and Deletion Rules
 
@@ -557,7 +559,7 @@ The database enforces relational ownership, allowed enum values, non-negative am
 
 ## 12. Model Decision Checklist
 
-Before turning this document into `migrations/0001_initial.sql`, confirm:
+The implemented model confirms:
 
 - [x] A user is the tenant boundary; shared workspaces are not required.
 - [x] External authentication identities remain separate from application users.

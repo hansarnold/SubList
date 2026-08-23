@@ -1,9 +1,9 @@
-# OpenSubLists Pre-implementation Checklist
+# OpenSubLists Implementation Readiness Checklist
 
-> Status: Ready for MVP scaffolding
+> Status: Local MVP implementation complete; hosted deployment pending
 > Last updated: 2026-08-23
 
-This checklist records the planning evidence required before application code is created.
+This checklist records both the planning evidence and the implementation gates for the MVP.
 
 ## 1. Product Scope
 
@@ -104,10 +104,10 @@ Evidence: [Import and Export](./import-export.md)
 - [x] Route and navigation map defined.
 - [x] First-run experience defined.
 - [x] Dashboard and list information order defined.
-- [x] Desktop visual references selected for Dashboard and Subscriptions.
+- [x] Wide-browser visual references selected for Dashboard and Subscriptions.
 - [x] Create, edit, detail, and lifecycle interactions defined.
 - [x] Settings and import flows defined.
-- [x] Mobile and desktop behavior defined.
+- [x] Narrow- and wide-browser responsive behavior defined.
 - [x] Loading, empty, error, and session-expired states defined.
 - [x] Accessibility requirements defined.
 - [x] English and Simplified Chinese localization requirement defined.
@@ -128,33 +128,34 @@ Evidence: [MVP UI Flow](./ui-flow.md)
 
 Evidence: [Environments and Deployment](./environments-and-deployment.md)
 
-## 10. Local Scaffolding Start Gate
+## 10. Local Implementation Gate
 
 Planning and local runtime preparation no longer block application code:
 
 - [x] Switch the workstation from Node.js 23.11.0, which is end-of-life, to Node.js 24 LTS.
 
-The following are part of the scaffold itself rather than prerequisites that require another planning round:
+The local scaffold and implementation are complete:
 
-- [ ] Pin Node.js in repository metadata and pin pnpm through the `packageManager` field.
-- [ ] Create `package.json`, the pnpm lockfile, and the formatting, linting, type-checking, and test scripts.
-- [ ] Install Wrangler locally as a development dependency; a global Wrangler installation is neither required nor preferred.
-- [ ] Create `wrangler.jsonc` with local-safe values and preview/production placeholders.
-- [ ] Generate the Worker `Env` type from the Wrangler configuration.
-- [ ] Create `migrations/0001_initial.sql` from the approved D1 DDL.
-- [ ] Add the initial CI workflow for install, format, lint, type-check, test, and build.
+- [x] Pin Node.js in repository metadata and pin pnpm through the `packageManager` field.
+- [x] Create `package.json`, the pnpm lockfile, and the formatting, linting, type-checking, and test scripts.
+- [x] Install Wrangler locally as a development dependency; a global Wrangler installation is neither required nor preferred.
+- [x] Create `wrangler.jsonc` with loopback-safe local values and fail-closed preview/production placeholders.
+- [x] Generate the Worker `Env` type from the Wrangler configuration.
+- [x] Create and locally apply the numbered D1 migrations.
+- [x] Add the CI workflow for install, formatting, linting, type checking, tests, and bundle validation.
+- [x] Implement and test the responsive website, API, authentication boundary, billing rules, and data portability flows.
 
 Cloudflare account IDs, D1 database IDs, Access audience values, and production hostnames are not required for local scaffolding. They become required before the first preview deployment.
 
-## 11. Inputs Required During Implementation
+## 11. Inputs Required Before Hosted Deployment
 
-These inputs do not block project scaffolding:
+These inputs do not block local use:
 
-- Pin the active Node.js LTS and exact package versions in repository files.
-- Create local, preview, and production Cloudflare resource configuration from examples.
 - Obtain a redacted native SubList export before implementing its adapter.
-- Supply real Access and D1 identifiers only through deployment configuration.
+- Supply the real preview and production origins, Access team domain, and audience values.
+- Create or bind isolated preview and production D1 databases.
+- Configure Access OTP policies and approved email addresses before exposing either hostname.
 
-## 12. Next Authorized Engineering Step
+## 12. Next Delivery Step
 
-The next implementation step is to scaffold the TypeScript Worker and React project, create `migrations/0001_initial.sql` from the approved data model, and implement the pure billing and money modules test-first.
+Create the preview Cloudflare resources, replace the non-functional placeholders, apply both remote migrations, deploy the preview Worker, and complete the documented Access and tenant-isolation smoke tests.

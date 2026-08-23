@@ -1,0 +1,332 @@
+import { DomainValidationError } from "./errors";
+
+export const MICROS_PER_UNIT = 1_000_000n;
+export const MAX_PERSISTED_MICROS = BigInt(Number.MAX_SAFE_INTEGER);
+
+export type CurrencyCode = string;
+
+export interface Rational {
+  readonly numerator: bigint;
+  readonly denominator: bigint;
+}
+
+const CANONICAL_AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d{1,6}))?$/;
+
+// ISO 4217 active currencies and commonly used ISO fund/metal/testing codes.
+const SUPPORTED_CURRENCIES = new Set([
+  "AED",
+  "AFN",
+  "ALL",
+  "AMD",
+  "AOA",
+  "ARS",
+  "AUD",
+  "AWG",
+  "AZN",
+  "BAM",
+  "BBD",
+  "BDT",
+  "BGN",
+  "BHD",
+  "BIF",
+  "BMD",
+  "BND",
+  "BOB",
+  "BOV",
+  "BRL",
+  "BSD",
+  "BTN",
+  "BWP",
+  "BYN",
+  "BZD",
+  "CAD",
+  "CDF",
+  "CHE",
+  "CHF",
+  "CHW",
+  "CLF",
+  "CLP",
+  "CNY",
+  "COP",
+  "COU",
+  "CRC",
+  "CUP",
+  "CVE",
+  "CZK",
+  "DJF",
+  "DKK",
+  "DOP",
+  "DZD",
+  "EGP",
+  "ERN",
+  "ETB",
+  "EUR",
+  "FJD",
+  "FKP",
+  "GBP",
+  "GEL",
+  "GHS",
+  "GIP",
+  "GMD",
+  "GNF",
+  "GTQ",
+  "GYD",
+  "HKD",
+  "HNL",
+  "HTG",
+  "HUF",
+  "IDR",
+  "ILS",
+  "INR",
+  "IQD",
+  "IRR",
+  "ISK",
+  "JMD",
+  "JOD",
+  "JPY",
+  "KES",
+  "KGS",
+  "KHR",
+  "KMF",
+  "KPW",
+  "KRW",
+  "KWD",
+  "KYD",
+  "KZT",
+  "LAK",
+  "LBP",
+  "LKR",
+  "LRD",
+  "LSL",
+  "LYD",
+  "MAD",
+  "MDL",
+  "MGA",
+  "MKD",
+  "MMK",
+  "MNT",
+  "MOP",
+  "MRU",
+  "MUR",
+  "MVR",
+  "MWK",
+  "MXN",
+  "MXV",
+  "MYR",
+  "MZN",
+  "NAD",
+  "NGN",
+  "NIO",
+  "NOK",
+  "NPR",
+  "NZD",
+  "OMR",
+  "PAB",
+  "PEN",
+  "PGK",
+  "PHP",
+  "PKR",
+  "PLN",
+  "PYG",
+  "QAR",
+  "RON",
+  "RSD",
+  "RUB",
+  "RWF",
+  "SAR",
+  "SBD",
+  "SCR",
+  "SDG",
+  "SEK",
+  "SGD",
+  "SHP",
+  "SLE",
+  "SOS",
+  "SRD",
+  "SSP",
+  "STN",
+  "SVC",
+  "SYP",
+  "SZL",
+  "THB",
+  "TJS",
+  "TMT",
+  "TND",
+  "TOP",
+  "TRY",
+  "TTD",
+  "TWD",
+  "TZS",
+  "UAH",
+  "UGX",
+  "USD",
+  "USN",
+  "UYI",
+  "UYU",
+  "UYW",
+  "UZS",
+  "VED",
+  "VES",
+  "VND",
+  "VUV",
+  "WST",
+  "XAF",
+  "XAG",
+  "XAU",
+  "XBA",
+  "XBB",
+  "XBC",
+  "XBD",
+  "XCD",
+  "XCG",
+  "XDR",
+  "XOF",
+  "XPD",
+  "XPF",
+  "XPT",
+  "XSU",
+  "XTS",
+  "XUA",
+  "XXX",
+  "YER",
+  "ZAR",
+  "ZMW",
+  "ZWG",
+]);
+
+export function assertPersistedMicros(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new DomainValidationError(
+      "INVALID_AMOUNT",
+      "Money micro-units must be a non-negative safe integer.",
+      "amount",
+    );
+  }
+
+  return value;
+}
+
+export function parseAmountToMicros(amount: string): number {
+  const match = CANONICAL_AMOUNT_PATTERN.exec(amount);
+  if (!match) {
+    throw new DomainValidationError(
+      "INVALID_AMOUNT",
+      "Use a non-negative canonical decimal with no more than six fractional digits.",
+      "amount",
+    );
+  }
+
+  const decimalSeparator = amount.indexOf(".");
+  const wholePart = decimalSeparator === -1 ? amount : amount.slice(0, decimalSeparator);
+  const fractionPart = decimalSeparator === -1 ? "" : amount.slice(decimalSeparator + 1);
+  const micros = BigInt(wholePart) * MICROS_PER_UNIT + BigInt(fractionPart.padEnd(6, "0"));
+
+  if (micros > MAX_PERSISTED_MICROS) {
+    throw new DomainValidationError(
+      "INVALID_AMOUNT",
+      "The amount exceeds the maximum supported value.",
+      "amount",
+    );
+  }
+
+  return Number(micros);
+}
+
+export function formatMicrosAsAmount(micros: number | bigint): string {
+  const exactMicros = typeof micros === "bigint" ? micros : BigInt(assertPersistedMicros(micros));
+
+  if (exactMicros < 0n) {
+    throw new DomainValidationError(
+      "INVALID_AMOUNT",
+      "Money micro-units must not be negative.",
+      "amount",
+    );
+  }
+
+  const wholePart = exactMicros / MICROS_PER_UNIT;
+  const fractionPart = (exactMicros % MICROS_PER_UNIT)
+    .toString()
+    .padStart(6, "0")
+    .replace(/0+$/, "");
+
+  return fractionPart.length === 0 ? wholePart.toString() : `${wholePart}.${fractionPart}`;
+}
+
+export function isSupportedCurrencyCode(value: string): value is CurrencyCode {
+  return /^[A-Z]{3}$/.test(value) && SUPPORTED_CURRENCIES.has(value);
+}
+
+export function assertCurrencyCode(value: string): CurrencyCode {
+  if (!isSupportedCurrencyCode(value)) {
+    throw new DomainValidationError(
+      "INVALID_CURRENCY",
+      "Use a supported uppercase ISO 4217 currency code.",
+      "currency",
+    );
+  }
+
+  return value;
+}
+
+export function makeRational(numerator: bigint, denominator: bigint = 1n): Rational {
+  if (denominator === 0n) {
+    throw new RangeError("A rational denominator cannot be zero.");
+  }
+
+  const sign = denominator < 0n ? -1n : 1n;
+  const signedNumerator = numerator * sign;
+  const positiveDenominator = denominator * sign;
+  const divisor = greatestCommonDivisor(absolute(signedNumerator), positiveDenominator);
+
+  return {
+    numerator: signedNumerator / divisor,
+    denominator: positiveDenominator / divisor,
+  };
+}
+
+export function addRationals(left: Rational, right: Rational): Rational {
+  return makeRational(
+    left.numerator * right.denominator + right.numerator * left.denominator,
+    left.denominator * right.denominator,
+  );
+}
+
+export function divideRational(value: Rational, divisor: bigint): Rational {
+  if (divisor === 0n) {
+    throw new RangeError("A rational divisor cannot be zero.");
+  }
+
+  return makeRational(value.numerator, value.denominator * divisor);
+}
+
+export function roundRationalToBigInt(value: Rational): bigint {
+  const quotient = value.numerator / value.denominator;
+  const remainder = value.numerator % value.denominator;
+
+  if (absolute(remainder) * 2n < value.denominator) {
+    return quotient;
+  }
+
+  return quotient + (value.numerator < 0n ? -1n : 1n);
+}
+
+export function formatRationalMicrosAsAmount(value: Rational): string {
+  return formatMicrosAsAmount(roundRationalToBigInt(value));
+}
+
+function greatestCommonDivisor(left: bigint, right: bigint): bigint {
+  let a = left;
+  let b = right;
+
+  while (b !== 0n) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+
+  return a === 0n ? 1n : a;
+}
+
+function absolute(value: bigint): bigint {
+  return value < 0n ? -value : value;
+}

@@ -18,15 +18,15 @@ The implementation belongs in a pure TypeScript domain module.
 
 ## 2. Terminology
 
-| Term | Meaning |
-| --- | --- |
-| Local today | The current `YYYY-MM-DD` date in the user's configured IANA time zone |
-| Billing anchor | A known valid occurrence of the recurring charge |
-| Recurrence unit | `day`, `week`, `month`, or `year` |
-| Recurrence count | Number of recurrence units between charges |
+| Term              | Meaning                                                               |
+| ----------------- | --------------------------------------------------------------------- |
+| Local today       | The current `YYYY-MM-DD` date in the user's configured IANA time zone |
+| Billing anchor    | A known valid occurrence of the recurring charge                      |
+| Recurrence unit   | `day`, `week`, `month`, or `year`                                     |
+| Recurrence count  | Number of recurrence units between charges                            |
 | Calendar-day mode | Preserve the anchor day and clamp only when a target month is shorter |
-| End-of-month mode | Always use the final calendar day of each target month |
-| Next billing date | The first valid occurrence on or after local today |
+| End-of-month mode | Always use the final calendar day of each target month                |
+| Next billing date | The first valid occurrence on or after local today                    |
 
 The billing anchor does not need to be the first-ever payment. Any known occurrence is sufficient.
 
@@ -246,21 +246,21 @@ monthly estimate = annualized estimate / 12
 
 ## 13. Required Test Matrix
 
-| Case | Anchor | Rule | Local today | Expected next billing |
-| --- | --- | --- | --- | --- |
-| Due today | 2026-08-23 | Every day | 2026-08-23 | 2026-08-23 |
-| Every two days | 2026-08-20 | Every 2 days | 2026-08-23 | 2026-08-24 |
-| Every two weeks | 2026-08-10 | Every 2 weeks | 2026-08-23 | 2026-08-24 |
-| Month-end clamp | 2026-01-31 | Monthly, calendar day | 2026-02-01 | 2026-02-28 |
-| Inclusive clamp date | 2026-01-31 | Monthly, calendar day | 2026-02-28 | 2026-02-28 |
-| Restore anchor day | 2026-01-31 | Monthly, calendar day | 2026-03-01 | 2026-03-31 |
-| February calendar day | 2026-02-28 | Monthly, calendar day | 2026-03-01 | 2026-03-28 |
-| February end of month | 2026-02-28 | Monthly, end of month | 2026-03-01 | 2026-03-31 |
-| Every three months | 2026-01-31 | Every 3 months | 2026-04-01 | 2026-04-30 |
-| Leap-day yearly | 2024-02-29 | Yearly | 2025-02-01 | 2025-02-28 |
-| Leap-day after occurrence | 2024-02-29 | Yearly | 2025-03-01 | 2026-02-28 |
-| Future anchor | 2026-12-01 | Monthly | 2026-08-23 | 2026-12-01 |
-| Cancelled | Any | Any | Any | `NULL` |
+| Case                      | Anchor     | Rule                  | Local today | Expected next billing |
+| ------------------------- | ---------- | --------------------- | ----------- | --------------------- |
+| Due today                 | 2026-08-23 | Every day             | 2026-08-23  | 2026-08-23            |
+| Every two days            | 2026-08-20 | Every 2 days          | 2026-08-23  | 2026-08-24            |
+| Every two weeks           | 2026-08-10 | Every 2 weeks         | 2026-08-23  | 2026-08-24            |
+| Month-end clamp           | 2026-01-31 | Monthly, calendar day | 2026-02-01  | 2026-02-28            |
+| Inclusive clamp date      | 2026-01-31 | Monthly, calendar day | 2026-02-28  | 2026-02-28            |
+| Restore anchor day        | 2026-01-31 | Monthly, calendar day | 2026-03-01  | 2026-03-31            |
+| February calendar day     | 2026-02-28 | Monthly, calendar day | 2026-03-01  | 2026-03-28            |
+| February end of month     | 2026-02-28 | Monthly, end of month | 2026-03-01  | 2026-03-31            |
+| Every three months        | 2026-01-31 | Every 3 months        | 2026-04-01  | 2026-04-30            |
+| Leap-day yearly           | 2024-02-29 | Yearly                | 2025-02-01  | 2025-02-28            |
+| Leap-day after occurrence | 2024-02-29 | Yearly                | 2025-03-01  | 2026-02-28            |
+| Future anchor             | 2026-12-01 | Monthly               | 2026-08-23  | 2026-12-01            |
+| Cancelled                 | Any        | Any                   | Any         | `NULL`                |
 
 Additional property tests should verify:
 
