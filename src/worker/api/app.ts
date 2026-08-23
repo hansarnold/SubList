@@ -1,4 +1,5 @@
-import { Hono, type Context } from "hono";
+import { Hono, type Context, type Input } from "hono";
+import { routePath } from "hono/route";
 import { z } from "zod";
 import { ApplicationError } from "../../application/errors";
 import { ExchangeRateRefreshService } from "../../application/fx-service";
@@ -26,6 +27,7 @@ import { EcbExchangeRateProvider } from "../fx/ecb";
 import { CRUD_BODY_LIMIT, IMPORT_BODY_LIMIT, parseJsonBody } from "./http";
 
 type Variables = {
+  errorCode: string | null;
   requestId: string;
   user: AppUser;
   service: OpenSubListsService;
@@ -47,6 +49,7 @@ export function createApp(
 
   app.use("*", async (context, next) => {
     const requestId = context.req.header("Cf-Ray") ?? crypto.randomUUID();
+    context.set("errorCode", null);
     context.set("requestId", requestId);
     const startedAt = performance.now();
     await next();
@@ -60,9 +63,10 @@ export function createApp(
         environment: context.env.ENVIRONMENT,
         requestId,
         method: context.req.method,
-        path: context.req.path,
+        routeTemplate: requestRouteTemplate(context),
         status: context.res.status,
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+        errorCode: context.get("errorCode"),
       }),
     );
   });
@@ -97,19 +101,6 @@ export function createApp(
   );
 
   app.patch("/api/v1/me", async (context) =>
-    context.json({
-      data: await service(context).updateMe(
-        userId(context),
-        await parseJsonBody(context, updateUserSchema, CRUD_BODY_LIMIT),
-      ),
-    }),
-  );
-
-  app.get("/api/v1/settings", async (context) =>
-    context.json({ data: await service(context).getMe(userId(context)) }),
-  );
-
-  app.patch("/api/v1/settings", async (context) =>
     context.json({
       data: await service(context).updateMe(
         userId(context),
@@ -273,14 +264,24 @@ export function createApp(
   });
 
   app.post("/api/v1/imports/preview", async (context) => {
-    const input = await parseJsonBody(context, importPreviewRequestSchema, IMPORT_BODY_LIMIT);
+    const input = await parseJsonBody(
+      context,
+      importPreviewRequestSchema,
+      IMPORT_BODY_LIMIT,
+      assertSupportedArchiveVersion,
+    );
     return context.json({
       data: await service(context).previewImport(userId(context), input.archive),
     });
   });
 
   app.post("/api/v1/imports", async (context) => {
-    const input = await parseJsonBody(context, importRequestSchema, IMPORT_BODY_LIMIT);
+    const input = await parseJsonBody(
+      context,
+      importRequestSchema,
+      IMPORT_BODY_LIMIT,
+      assertSupportedArchiveVersion,
+    );
     return context.json({ data: await service(context).importArchive(userId(context), input) });
   });
 
@@ -305,10 +306,12 @@ export function createApp(
     console.error(
       JSON.stringify({
         message: "request_failed",
+        environment: context.env.ENVIRONMENT,
         requestId: context.get("requestId"),
         method: context.req.method,
-        path: context.req.path,
-        error: error instanceof Error ? error.message : "Unknown error",
+        routeTemplate: requestRouteTemplate(context),
+        status: 500,
+        errorCode: "INTERNAL_ERROR",
       }),
     );
     return errorResponse(
@@ -366,6 +369,16 @@ function parseSubscriptionFilter(context: Context<AppHono>) {
   const parsed = querySchema.safeParse(context.req.query());
   if (!parsed.success) throw invalidQuery(parsed.error.issues[0]?.path.join(".") ?? "query");
   if (parsed.data.currency !== undefined) assertCurrencyCode(parsed.data.currency);
+  const currencyFilters = new URL(context.req.url).searchParams.getAll("currency");
+  if (parsed.data.sort === "amount" && currencyFilters.length !== 1) {
+    throw new ApplicationError("VALIDATION_ERROR", "The query contains invalid fields.", 422, [
+      {
+        path: "sort",
+        code: "AMOUNT_SORT_REQUIRES_CURRENCY",
+        message: "Amount sorting requires exactly one currency filter.",
+      },
+    ]);
+  }
   return {
     ...(parsed.data.q === undefined ? {} : { query: parsed.data.q }),
     ...(parsed.data.status === undefined ? {} : { status: parsed.data.status }),
@@ -385,6 +398,27 @@ function parseSubscriptionFilter(context: Context<AppHono>) {
   };
 }
 
+function assertSupportedArchiveVersion(source: unknown): void {
+  if (!isRecord(source) || !isRecord(source.archive)) return;
+  const archive = source.archive;
+  if (
+    archive.format === "opensublists" &&
+    typeof archive.schemaVersion === "number" &&
+    Number.isInteger(archive.schemaVersion) &&
+    archive.schemaVersion !== 2
+  ) {
+    throw new ApplicationError(
+      "UNSUPPORTED_ARCHIVE_VERSION",
+      "This OpenSubLists archive version is not supported.",
+      422,
+    );
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function invalidQuery(path: string): ApplicationError {
   return new ApplicationError("VALIDATION_ERROR", "The query contains invalid fields.", 422, [
     { path, code: "INVALID_QUERY", message: "The query parameter is invalid." },
@@ -393,6 +427,7 @@ function invalidQuery(path: string): ApplicationError {
 
 function errorResponse(context: Context<AppHono>, error: ApplicationError): Response {
   const requestId = context.get("requestId") || crypto.randomUUID();
+  context.set("errorCode", error.code);
   const body: ApiError = {
     error: {
       code: error.code,
@@ -405,6 +440,12 @@ function errorResponse(context: Context<AppHono>, error: ApplicationError): Resp
   response.headers.set("Cache-Control", "private, no-store");
   response.headers.set("X-Request-Id", requestId);
   return response;
+}
+
+function requestRouteTemplate<Path extends string, RequestInput extends Input>(
+  context: Context<AppHono, Path, RequestInput>,
+): string {
+  return routePath(context, -1) || "<unmatched>";
 }
 
 export default createApp();

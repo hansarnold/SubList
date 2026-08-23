@@ -45,6 +45,7 @@ import {
   formatMoney,
   paymentMethodFor,
 } from "../../utils/format";
+import { hasExactlyOneCurrencyFilter, normalizeSubscriptionListParams } from "./search-params";
 
 type ViewMode = "grid" | "list";
 
@@ -348,10 +349,16 @@ export function SubscriptionsPage() {
     localStorage.getItem("opensublists-subscription-view") === "list" ? "list" : "grid",
   );
   const queryString = searchParams.toString();
+  const normalizedSearchParams = useMemo(
+    () => normalizeSubscriptionListParams(searchParams),
+    [searchParams],
+  );
+  const normalizedQueryString = normalizedSearchParams.toString();
+  const amountSortAllowed = hasExactlyOneCurrencyFilter(normalizedSearchParams);
 
   const subscriptionQuery = useQuery({
-    queryKey: ["subscriptions", queryString],
-    queryFn: () => api.subscriptions(searchParams),
+    queryKey: ["subscriptions", normalizedQueryString],
+    queryFn: () => api.subscriptions(normalizedSearchParams),
     placeholderData: keepPreviousData,
   });
   const [categoriesQuery, paymentMethodsQuery, dashboardQuery] = useQueries({
@@ -377,6 +384,11 @@ export function SubscriptionsPage() {
   }, [view]);
 
   useEffect(() => {
+    if (normalizedQueryString === queryString) return;
+    setSearchParams(normalizedSearchParams, { replace: true });
+  }, [normalizedQueryString, normalizedSearchParams, queryString, setSearchParams]);
+
+  useEffect(() => {
     if (searchValue === querySearch) return;
     const timeout = window.setTimeout(() => {
       const next = new URLSearchParams(searchParams);
@@ -391,17 +403,18 @@ export function SubscriptionsPage() {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
-    setSearchParams(next, { replace: true });
+    setSearchParams(normalizeSubscriptionListParams(next), { replace: true });
   }
 
   function clearFilters() {
     const next = new URLSearchParams(searchParams);
     filterKeys.forEach((key) => next.delete(key));
-    setSearchParams(next, { replace: true });
+    setSearchParams(normalizeSubscriptionListParams(next), { replace: true });
   }
 
   function setSort(value: string) {
     const [sort, order] = value.split(":");
+    if (sort === "amount" && !amountSortAllowed) return;
     const next = new URLSearchParams(searchParams);
     if (sort === "nextBillingOn" && order === "asc") {
       next.delete("sort");
@@ -410,7 +423,7 @@ export function SubscriptionsPage() {
       if (sort) next.set("sort", sort);
       if (order) next.set("order", order);
     }
-    setSearchParams(next, { replace: true });
+    setSearchParams(normalizeSubscriptionListParams(next), { replace: true });
   }
 
   const currencies = useMemo(() => {
@@ -438,7 +451,7 @@ export function SubscriptionsPage() {
   }
 
   const subscriptions = subscriptionQuery.data;
-  const sortValue = `${searchParams.get("sort") ?? "nextBillingOn"}:${searchParams.get("order") ?? "asc"}`;
+  const sortValue = `${normalizedSearchParams.get("sort") ?? "nextBillingOn"}:${normalizedSearchParams.get("order") ?? "asc"}`;
   const archiveBusyId = archiveMutation.isPending ? archiveMutation.variables?.id : undefined;
 
   function toggleArchive(subscription: Subscription) {
@@ -474,7 +487,11 @@ export function SubscriptionsPage() {
             <select value={sortValue} onChange={(event) => setSort(event.target.value)}>
               <option value="nextBillingOn:asc">{t("subscriptions.nextBilling")}</option>
               <option value="name:asc">{t("subscriptions.name")}</option>
-              <option value="amount:desc">{t("subscriptions.amount")}</option>
+              <option value="amount:desc" disabled={!amountSortAllowed}>
+                {amountSortAllowed
+                  ? t("subscriptions.amount")
+                  : t("subscriptions.amountRequiresCurrency")}
+              </option>
               <option value="createdAt:desc">{t("subscriptions.recentlyAdded")}</option>
             </select>
             <IconChevronDown size={17} aria-hidden="true" />

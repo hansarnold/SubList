@@ -1287,9 +1287,13 @@ button:disabled,
   font-weight: 700;
 }
 
+.page--dashboard > .reporting-estimates {
+  margin-bottom: 30px;
+}
+
 .reporting-estimates__grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
   margin: 18px 0;
   overflow: hidden;
@@ -2492,6 +2496,41 @@ button:disabled,
   font-size: 0.83rem;
 }
 
+.import-result {
+  display: grid;
+  gap: 12px;
+}
+
+.import-result__counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.import-result__counts > div {
+  display: grid;
+  gap: 4px;
+  padding: 13px;
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+
+.import-result__counts span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.import-result__counts strong {
+  font-size: 1.25rem;
+}
+
+.import-result ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-soft);
+  font-size: 0.83rem;
+}
+
 @media (max-width: 1280px) {
   .filter-panel {
     grid-template-columns: repeat(3, minmax(150px, 1fr));
@@ -2530,6 +2569,10 @@ button:disabled,
 
   .dashboard-grid__side {
     grid-template-columns: 1fr;
+  }
+
+  .reporting-estimates__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .subscription-grid {
@@ -2855,10 +2898,6 @@ button:disabled,
     padding: 17px;
   }
 
-  .reporting-estimates__grid {
-    grid-template-columns: 1fr;
-  }
-
   .original-estimates__grid {
     grid-template-columns: 1fr;
   }
@@ -3046,6 +3085,10 @@ button:disabled,
 
   .import-preview__counts {
     grid-template-columns: 1fr;
+  }
+
+  .import-result__counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .file-picker {

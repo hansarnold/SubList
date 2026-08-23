@@ -226,6 +226,8 @@ Preview and production smoke tests verify:
 - Another test identity cannot access the first identity's resources in preview.
 - API responses include `Cache-Control: private, no-store`.
 - Hashed static assets return long-lived cache headers.
+- Static page and asset responses deny framing, disable MIME sniffing, and send no
+  referrer information.
 - The Worker cannot be reached through an unprotected alternate route.
 - The FX snapshot has the expected ECB source, reference date, and complete coverage for every active subscription currency.
 - Reporting-currency estimates and original-currency totals pass a reviewed fixture calculation.
@@ -234,7 +236,9 @@ Production smoke tests must avoid creating realistic sensitive data. Any created
 
 ## 11. Observability
 
-Enable Workers logs for preview and production.
+Enable sampled application logs for preview and production. The initial private
+deployment retains all application log events (`head_sampling_rate: 1`); lower this
+rate only if measured traffic justifies it.
 
 Minimum structured fields:
 
@@ -248,6 +252,14 @@ Minimum structured fields:
 - Scheduled-job name when applicable.
 
 Do not log JWTs, cookies, request bodies, notes, payment labels, or import contents.
+
+Cloudflare invocation logs are disabled because their built-in fetch record includes
+the full request URL. Automatic Workers traces are also disabled because their fetch
+spans currently include `url.full`, `url.path`, and `url.query`. Those platform streams
+must remain disabled until Cloudflare provides a redaction control that preserves this
+project's route-template-only privacy boundary. The application-owned completion and
+failure records provide request timing, status, and stable error codes without concrete
+resource identifiers.
 
 Initial operational alerts may be manual dashboard checks. Add automated alerting when real usage justifies it.
 

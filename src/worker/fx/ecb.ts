@@ -3,9 +3,9 @@ import type {
   ExchangeRateProviderSnapshot,
 } from "../../application/fx-service";
 import {
-  assertCurrencyCode,
   assertIsoCalendarDate,
   canonicalizePositiveDecimal,
+  isSupportedCurrencyCode,
   type CurrencyCode,
   type FxRate,
 } from "../../domain";
@@ -88,6 +88,7 @@ export function parseEcbCsv(csv: string): ExchangeRateProviderSnapshot {
   }
 
   const parsedRows: Array<{ currency: CurrencyCode; rateDate: string; unitsPerEur: string }> = [];
+  let latestRateDate = "0001-01-01";
   for (const [lineIndex, line] of lines.slice(1).entries()) {
     const values = parseCsvLine(line);
     const value = (column: string): string => values[indexes[column] ?? -1] ?? "";
@@ -101,10 +102,18 @@ export function parseEcbCsv(csv: string): ExchangeRateProviderSnapshot {
     }
 
     try {
+      const currency = value("CURRENCY");
+      if (!/^[A-Z]{3}$/.test(currency)) {
+        throw new TypeError("The provider currency code is not an uppercase three-letter code.");
+      }
+      const rateDate = assertIsoCalendarDate(value("TIME_PERIOD"));
+      const unitsPerEur = canonicalizePositiveDecimal(value("OBS_VALUE"));
+      if (rateDate > latestRateDate) latestRateDate = rateDate;
+      if (!isSupportedCurrencyCode(currency)) continue;
       parsedRows.push({
-        currency: assertCurrencyCode(value("CURRENCY")),
-        rateDate: assertIsoCalendarDate(value("TIME_PERIOD")),
-        unitsPerEur: canonicalizePositiveDecimal(value("OBS_VALUE")),
+        currency,
+        rateDate,
+        unitsPerEur,
       });
     } catch (error) {
       throw new EcbProviderError(`The ECB response row ${lineIndex + 2} is invalid.`, {
@@ -113,10 +122,7 @@ export function parseEcbCsv(csv: string): ExchangeRateProviderSnapshot {
     }
   }
 
-  const rateDate = parsedRows.reduce(
-    (latest, row) => (row.rateDate > latest ? row.rateDate : latest),
-    "0001-01-01",
-  );
+  const rateDate = latestRateDate;
   const ratesByCurrency = new Map<CurrencyCode, FxRate>();
   ratesByCurrency.set("EUR", { currency: "EUR", unitsPerEur: "1" });
   for (const row of parsedRows) {

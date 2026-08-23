@@ -310,7 +310,11 @@ Completion criterion: A new user can record their first subscription without dev
 
 ## 16. Observability and Backups
 
-- Record structured error logs without Access JWTs, full notes, or other sensitive content.
+- Record structured request and error logs using registered route templates and stable
+  codes, without Access JWTs, concrete resource paths, raw exception messages, full
+  notes, or other sensitive content.
+- Keep automatic invocation logs and traces disabled while Cloudflare includes full
+  request URLs in those platform records; use explicitly sampled application logs.
 - Return stable API error codes and readable messages.
 - Make database migrations repeatable and validate them before deployment.
 - Use D1 recovery as a baseline while still providing user-level JSON export.

@@ -353,7 +353,7 @@ function PaymentBreakdownSymbol({ item }: { item: PaymentMethodBreakdown }) {
   if (item.paymentMethodSymbol) {
     return <SymbolGlyph symbol={item.paymentMethodSymbol} size={20} />;
   }
-  return <PaymentMethodSymbol symbol={null} kind="other" size={20} />;
+  return <PaymentMethodSymbol symbol={null} kind={item.paymentMethodKind ?? "other"} size={20} />;
 }
 
 function PaymentMethodBreakdownView({ data, locale }: { data: Dashboard; locale: string }) {
@@ -425,13 +425,9 @@ export function DashboardPage() {
         />
       ) : (
         <>
+          <ReportingEstimates data={data} locale={i18n.language} />
           <DashboardSummary data={data} locale={i18n.language} days={days} />
-          <div className="dashboard-grid">
-            <UpcomingAgenda data={data} locale={i18n.language} days={days} setDays={setDays} />
-            <aside className="dashboard-grid__side">
-              <ReportingEstimates data={data} locale={i18n.language} />
-            </aside>
-          </div>
+          <UpcomingAgenda data={data} locale={i18n.language} days={days} setDays={setDays} />
           <OriginalCurrencyEstimates data={data} locale={i18n.language} />
           <div className="breakdown-grid">
             <CategoryBreakdown data={data} locale={i18n.language} />

@@ -10,6 +10,7 @@ export async function parseJsonBody<T>(
   context: Context,
   schema: ZodType<T>,
   limit = CRUD_BODY_LIMIT,
+  inspect?: (source: unknown) => void,
 ): Promise<T> {
   const contentType = context.req.header("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (contentType !== "application/json") {
@@ -27,6 +28,7 @@ export async function parseJsonBody<T>(
   } catch {
     throw new ApplicationError("INVALID_JSON", "The request body is not valid JSON.", 400);
   }
+  inspect?.(source);
   const result = schema.safeParse(source);
   if (!result.success) {
     const details: ApiErrorDetail[] = result.error.issues.map((issue) => ({

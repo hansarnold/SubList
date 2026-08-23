@@ -30,6 +30,18 @@ describe("OpenSubLists Worker API", () => {
     expect(body.data.user.email).toBe("developer@localhost.invalid");
   });
 
+  it("keeps profile settings on the canonical me endpoint only", async () => {
+    const getAlias = await api("/api/v1/settings");
+    expect(getAlias.status).toBe(404);
+
+    const patchAlias = await api("/api/v1/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: ORIGIN },
+      body: "{}",
+    });
+    expect(patchAlias.status).toBe(404);
+  });
+
   it("fails closed when local identity mode receives a remote-host request", async () => {
     const request = new IncomingRequest("https://app.example.com/api/v1/session");
     const response = await worker.fetch(request, env, createExecutionContext());
@@ -148,6 +160,7 @@ describe("OpenSubLists Worker API", () => {
         upcoming: Array<{ subscriptionId: string }>;
         totalsByCurrency: Array<{ currency: string; upcomingAmount: string }>;
         categoryBreakdown: Array<{ subscriptionCount: number }>;
+        paymentMethodBreakdown: Array<{ paymentMethodKind: string | null }>;
       };
     }>();
     expect(dashboard.data.upcoming).toHaveLength(3);
@@ -158,6 +171,32 @@ describe("OpenSubLists Worker API", () => {
       expect.objectContaining({ currency: "USD", upcomingAmount: "29.97" }),
     );
     expect(dashboard.data.categoryBreakdown[0]?.subscriptionCount).toBe(1);
+    expect(dashboard.data.paymentMethodBreakdown[0]?.paymentMethodKind).toBe("card");
+  });
+
+  it("requires exactly one currency filter for amount sorting", async () => {
+    const missingCurrency = await api("/api/v1/subscriptions?sort=amount&order=desc");
+    expect(missingCurrency.status).toBe(422);
+    await expect(missingCurrency.json()).resolves.toMatchObject({
+      error: {
+        code: "VALIDATION_ERROR",
+        details: [{ path: "sort", code: "AMOUNT_SORT_REQUIRES_CURRENCY" }],
+      },
+    });
+
+    const duplicateCurrency = await api(
+      "/api/v1/subscriptions?sort=amount&order=desc&currency=USD&currency=CNY",
+    );
+    expect(duplicateCurrency.status).toBe(422);
+    await expect(duplicateCurrency.json()).resolves.toMatchObject({
+      error: {
+        code: "VALIDATION_ERROR",
+        details: [{ path: "sort", code: "AMOUNT_SORT_REQUIRES_CURRENCY" }],
+      },
+    });
+
+    const oneCurrency = await api("/api/v1/subscriptions?sort=amount&order=desc&currency=USD");
+    expect(oneCurrency.status).toBe(200);
   });
 
   it("detaches a deleted category without deleting the subscription", async () => {
@@ -210,6 +249,38 @@ describe("OpenSubLists Worker API", () => {
     }>("/api/v1/imports/preview", { archive });
     expect(preview.digest).toMatch(/^sha256-[a-f0-9]{64}$/);
     expect(preview.conflicts.categories).toBe(1);
+  });
+
+  it("returns a stable error for unsupported archive schema versions", async () => {
+    await api("/api/v1/session");
+    const cases = [
+      {
+        path: "/api/v1/imports/preview",
+        body: { archive: { ...archiveWithSubscriptions(0), schemaVersion: 1 } },
+      },
+      {
+        path: "/api/v1/imports",
+        body: {
+          archive: { ...archiveWithSubscriptions(0), schemaVersion: 3 },
+          expectedDigest: `sha256-${"0".repeat(64)}`,
+          conflictStrategy: "skip",
+          importProfile: false,
+          confirmed: true,
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const response = await api(testCase.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: ORIGIN },
+        body: JSON.stringify(testCase.body),
+      });
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "UNSUPPORTED_ARCHIVE_VERSION" },
+      });
+    }
   });
 
   it("enforces tenant scope even when two users share the same resource id", async () => {

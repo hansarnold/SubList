@@ -158,7 +158,7 @@ Provisioning rules:
 4. If exactly one user matches the verified email, attach the new identity to that user. This handles Access removal and re-addition.
 5. Otherwise, create a new `users` row and identity in one D1 batch transaction.
 
-Because email-based OTP proves control of the approved mailbox, verified-email relinking is acceptable for the invite-only MVP. The relink event should be logged without logging the JWT.
+Because email-based OTP proves control of the approved mailbox, verified-email relinking is acceptable for the invite-only MVP. A successful relink emits a structured security-audit event containing only the stable event code, internal user ID, and provider; it does not log the JWT, email, or provider subject.
 
 ## 4.3 categories
 

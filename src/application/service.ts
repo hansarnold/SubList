@@ -519,6 +519,7 @@ export class OpenSubListsService {
       paymentMethodBreakdown: statistics.paymentMethodBreakdown.map((breakdown) => ({
         paymentMethodId: breakdown.id,
         paymentMethodName: breakdown.name,
+        paymentMethodKind: breakdown.paymentMethodKind,
         paymentMethodSymbol: breakdown.symbol,
         subscriptionCount: breakdown.subscriptionCount,
         ...toBreakdownReporting(

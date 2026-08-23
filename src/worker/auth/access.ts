@@ -77,7 +77,12 @@ function assertLocalDevelopmentRequest(request: Request, env: AuthenticationEnvi
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "[::1]"
+  );
 }
 
 function getRemoteKeySet(url: string): JWTVerifyGetKey {

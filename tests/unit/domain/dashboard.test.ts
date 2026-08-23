@@ -20,7 +20,7 @@ const utilities = {
   color: "#4D8DFF",
   symbol: null,
 };
-const visa = { id: "payment-visa", name: "Visa", symbol: null };
+const visa = { id: "payment-visa", name: "Visa", kind: "card" as const, symbol: null };
 
 function subscription(
   overrides: Partial<DashboardSubscription> &
@@ -163,6 +163,7 @@ describe("dashboard statistics", () => {
 
     const payment = statistics.paymentMethodBreakdown.find((item) => item.id === visa.id);
     expect(payment?.subscriptionCount).toBe(2);
+    expect(payment?.paymentMethodKind).toBe("card");
     expect(payment?.totalsByCurrency).toHaveLength(2);
   });
 

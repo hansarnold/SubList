@@ -1,9 +1,12 @@
 /// <reference types="node" />
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { OpenSubListsService } from "../../../src/application/service";
+import type { OpenSubListsRepository } from "../../../src/application/ports";
 import { archiveV2Schema } from "../../../src/shared/api-types/schemas";
 // @ts-expect-error The operator tool is intentionally plain JavaScript outside the app TS build.
 import * as untypedMigrationModule from "../../../tools/refactor-migration/index.js";
@@ -66,12 +69,20 @@ type ResourceCounts = {
 };
 
 type MigrationModule = {
-  migrateArchiveFiles: (options: { inputPath: string; outputDirectory: string }) => Promise<{
+  migrateArchiveFiles: (options: {
+    inputPath: string;
+    outputDirectory: string;
+    overwrite?: boolean;
+  }) => Promise<{
     archivePath: string;
     reviewPath: string;
     reportPath: string;
   }>;
-  REFACTOR_MIGRATION_OUTPUT_FILENAMES: Readonly<Record<string, string>>;
+  REFACTOR_MIGRATION_OUTPUT_FILENAMES: Readonly<{
+    archive: string;
+    review: string;
+    report: string;
+  }>;
   RefactorMigrationError: new (...args: unknown[]) => MigrationError;
   transformArchiveV1: (sourceText: string, symbolMapText?: string) => MigrationArtifacts;
 };
@@ -154,6 +165,30 @@ describe("the one-time archive v1 to v2 transformer", () => {
     expect(result.reviewCsv).toContain(`Visa [${PAYMENT_METHOD_ID}]`);
   });
 
+  it("emits v2 accepted by both the archive schema and runtime canonicalization", async () => {
+    const result = transformArchiveV1(sourceText());
+    const runtime = new OpenSubListsService({
+      getImportState: () =>
+        Promise.resolve({
+          categoryIds: new Set<string>(),
+          paymentMethodIds: new Set<string>(),
+          subscriptionIds: new Set<string>(),
+          categoryNameKeysById: new Map<string, string>(),
+        }),
+    } as unknown as OpenSubListsRepository);
+
+    expect(archiveV2Schema.safeParse(result.archive).success).toBe(true);
+    await expect(
+      runtime.previewImport(
+        "migration-rehearsal-user",
+        result.archive as unknown as Record<string, unknown>,
+      ),
+    ).resolves.toMatchObject({
+      schemaVersion: 2,
+      counts: { categories: 1, paymentMethods: 1, subscriptions: 3 },
+    });
+  });
+
   it("reports exact counts, micro-unit totals, relationships, and lifecycle findings", () => {
     const result = transformArchiveV1(sourceText());
     const report = result.verificationReport;
@@ -200,6 +235,34 @@ describe("the one-time archive v1 to v2 transformer", () => {
     expect(report.output.sha256).toMatch(/^sha256-[a-f0-9]{64}$/);
   });
 
+  it.each(["=1+1", "+cmd", "-cmd", "@cmd"])(
+    "neutralizes a spreadsheet formula prefix in CSV cells: %s",
+    (name) => {
+      const archive = makeArchiveV1();
+      archive.subscriptions[0]!.name = name;
+
+      const result = transformArchiveV1(JSON.stringify(archive));
+      const row = result.reviewCsv
+        .split("\n")
+        .find((value) => value.startsWith(`subscription,${ACTIVE_USD_ID},`));
+
+      expect(row).toContain(`,'${name},USD,`);
+      expect(row).not.toContain(`,${name},USD,`);
+    },
+  );
+
+  it("keeps a neutralized formula cell valid when CSV quoting is also required", () => {
+    const archive = makeArchiveV1();
+    archive.subscriptions[0]!.name = "=SUM(1,1)";
+
+    const result = transformArchiveV1(JSON.stringify(archive));
+    const row = result.reviewCsv
+      .split("\n")
+      .find((value) => value.startsWith(`subscription,${ACTIVE_USD_ID},`));
+
+    expect(row).toContain(`,"'=SUM(1,1)",USD,`);
+  });
+
   it("rejects broken category and payment-method references", () => {
     const archive = makeArchiveV1();
     archive.subscriptions[0]!.categoryId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -228,6 +291,32 @@ describe("the one-time archive v1 to v2 transformer", () => {
     );
   });
 
+  it("rejects currencies and time zones that runtime canonicalization does not support", () => {
+    const profileCurrency = makeArchiveV1();
+    profileCurrency.profile.defaultCurrency = "ZZZ";
+    expectMigrationError(
+      () => transformArchiveV1(JSON.stringify(profileCurrency)),
+      "INVALID_ARCHIVE",
+      "profile.defaultCurrency",
+    );
+
+    const subscriptionCurrency = makeArchiveV1();
+    subscriptionCurrency.subscriptions[0]!.currency = "ZZZ";
+    expectMigrationError(
+      () => transformArchiveV1(JSON.stringify(subscriptionCurrency)),
+      "INVALID_ARCHIVE",
+      "subscriptions.0.currency",
+    );
+
+    const timeZone = makeArchiveV1();
+    timeZone.profile.timezone = "GMT";
+    expectMigrationError(
+      () => transformArchiveV1(JSON.stringify(timeZone)),
+      "INVALID_ARCHIVE",
+      "profile.timezone",
+    );
+  });
+
   it("rejects unknown input fields instead of silently discarding them", () => {
     const archive = { ...makeArchiveV1(), unexpected: true };
     expectMigrationError(
@@ -249,6 +338,76 @@ describe("the one-time archive v1 to v2 transformer", () => {
       code: "OUTPUT_EXISTS",
     });
     await expect(readFile(first.archivePath, "utf8")).resolves.toBe(originalArchive);
+  });
+
+  it("accepts one leading package-manager argument separator at the CLI boundary", async () => {
+    const directory = await makeTemporaryDirectory();
+    const inputPath = join(directory, "source.json");
+    const outputDirectory = join(directory, "output");
+    await writeFile(inputPath, sourceText(), "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "tools/refactor-migration/cli.mjs"),
+        "--",
+        "--input",
+        inputPath,
+        "--output-dir",
+        outputDirectory,
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Refactor migration artifacts created:");
+    await expect(
+      readFile(join(outputDirectory, REFACTOR_MIGRATION_OUTPUT_FILENAMES.archive), "utf8"),
+    ).resolves.toContain('"schemaVersion": 2');
+  });
+
+  it("rejects a standalone separator after option parsing has begun", async () => {
+    const directory = await makeTemporaryDirectory();
+    const inputPath = join(directory, "source.json");
+    await writeFile(inputPath, sourceText(), "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "tools/refactor-migration/cli.mjs"),
+        "--input",
+        inputPath,
+        "--",
+        "--output-dir",
+        join(directory, "output"),
+      ],
+      { cwd: process.cwd(), encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Unknown option: --");
+  });
+
+  it("enforces private permissions for new and overwritten artifacts", async () => {
+    const directory = await makeTemporaryDirectory();
+    const inputPath = join(directory, "source.json");
+    const outputDirectory = join(directory, "output");
+    await writeFile(inputPath, sourceText(), "utf8");
+    await mkdir(outputDirectory, { mode: 0o755 });
+
+    const first = await migrateArchiveFiles({ inputPath, outputDirectory });
+    await expectPermissions(outputDirectory, 0o700);
+    for (const path of [first.archivePath, first.reviewPath, first.reportPath]) {
+      await expectPermissions(path, 0o600);
+      await chmod(path, 0o644);
+    }
+    await chmod(outputDirectory, 0o755);
+
+    const overwritten = await migrateArchiveFiles({ inputPath, outputDirectory, overwrite: true });
+    await expectPermissions(outputDirectory, 0o700);
+    for (const path of [overwritten.archivePath, overwritten.reviewPath, overwritten.reportPath]) {
+      await expectPermissions(path, 0o600);
+    }
   });
 
   it("produces path-independent deterministic artifact contents", async () => {
@@ -327,6 +486,10 @@ async function makeTemporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "opensublists-refactor-test-"));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+async function expectPermissions(path: string, expected: number): Promise<void> {
+  expect((await stat(path)).mode & 0o777).toBe(expected);
 }
 
 function sourceText(): string {

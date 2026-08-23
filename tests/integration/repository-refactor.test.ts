@@ -121,7 +121,7 @@ describe("refactored D1 repository", () => {
       {
         symbol: { type: "emoji", value: "✨" },
         category: { symbol: { type: "icon", value: "cloud" } },
-        paymentMethod: { symbol: { type: "icon", value: "brand_visa" } },
+        paymentMethod: { kind: "card", symbol: { type: "icon", value: "brand_visa" } },
       },
     ]);
 
@@ -258,7 +258,85 @@ describe("refactored D1 repository", () => {
     ).rejects.toThrow();
     expect(await repository.getFxSnapshot()).toEqual(second);
   });
+
+  it("prevents an older concurrent FX writer from replacing a newer snapshot", async () => {
+    const newer = fxSnapshot("2026-08-23", 500, "1.09");
+    const older = fxSnapshot("2026-08-22", 600, "1.07");
+
+    const result = await runOrderedConcurrentFxWrites(newer, older);
+
+    expect(result.outcomes).toEqual(["replaced", "unchanged"]);
+    expect(result.snapshot).toEqual(newer);
+  });
+
+  it("keeps the first completed snapshot when concurrent writers publish the same date", async () => {
+    const first = fxSnapshot("2026-08-23", 500, "1.09");
+    const sameDate = fxSnapshot("2026-08-23", 600, "1.07");
+
+    const result = await runOrderedConcurrentFxWrites(first, sameDate);
+
+    expect(result.outcomes).toEqual(["replaced", "unchanged"]);
+    expect(result.snapshot).toEqual(first);
+  });
 });
+
+async function runOrderedConcurrentFxWrites(first: FxSnapshot, second: FxSnapshot) {
+  let batchArrivals = 0;
+  let releaseBothBatches!: () => void;
+  let releaseFirstBatch!: () => void;
+  const bothBatchesReady = new Promise<void>((resolve) => {
+    releaseBothBatches = resolve;
+  });
+  const firstBatchFinished = new Promise<void>((resolve) => {
+    releaseFirstBatch = resolve;
+  });
+
+  const gatedDatabase = (position: "first" | "second"): D1Database =>
+    new Proxy(env.DB, {
+      get(target, property) {
+        if (property === "batch") {
+          return async <T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> => {
+            batchArrivals += 1;
+            if (batchArrivals === 2) releaseBothBatches();
+            await bothBatchesReady;
+            if (position === "second") await firstBatchFinished;
+            try {
+              return await target.batch<T>(statements);
+            } finally {
+              if (position === "first") releaseFirstBatch();
+            }
+          };
+        }
+        if (property === "prepare") return target.prepare.bind(target);
+        throw new Error(`Unexpected D1 database property access: ${String(property)}`);
+      },
+    });
+
+  const firstRepository = new D1OpenSubListsRepository(gatedDatabase("first"));
+  const secondRepository = new D1OpenSubListsRepository(gatedDatabase("second"));
+  const outcomes = await Promise.all([
+    firstRepository.replaceFxSnapshot(first),
+    secondRepository.replaceFxSnapshot(second),
+  ]);
+
+  return {
+    outcomes,
+    snapshot: await new D1OpenSubListsRepository(env.DB).getFxSnapshot(),
+  };
+}
+
+function fxSnapshot(rateDate: string, fetchedAt: number, usdRate: string): FxSnapshot {
+  return {
+    provider: "ecb",
+    rateDate,
+    baseCurrency: "EUR",
+    fetchedAt,
+    rates: [
+      { currency: "EUR", unitsPerEur: "1" },
+      { currency: "USD", unitsPerEur: usdRate },
+    ],
+  };
+}
 
 function localIdentity(key: string) {
   return {

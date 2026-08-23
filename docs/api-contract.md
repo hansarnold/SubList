@@ -1,7 +1,7 @@
 # OpenSubLists API Contract
 
 > Status: Implemented baseline with approved refactor target
-> Last updated: 2026-08-23  
+> Last updated: 2026-08-24
 > Base path: `/api/v1`  
 > Format: JSON over same-origin HTTPS
 
@@ -97,16 +97,17 @@ Error messages are safe for users and must not include SQL, stack traces, JWTs, 
 
 Common codes:
 
-| HTTP | Code                | Meaning                                      |
-| ---- | ------------------- | -------------------------------------------- |
-| 400  | `INVALID_JSON`      | Malformed JSON body                          |
-| 401  | `UNAUTHENTICATED`   | Missing, expired, or invalid Access token    |
-| 404  | `NOT_FOUND`         | Resource absent or not owned by current user |
-| 409  | `CONFLICT`          | Unique-name or state-transition conflict     |
-| 413  | `PAYLOAD_TOO_LARGE` | Request exceeds configured limit             |
-| 422  | `VALIDATION_ERROR`  | Structurally valid JSON with invalid fields  |
-| 429  | `RATE_LIMITED`      | Request rate exceeded                        |
-| 500  | `INTERNAL_ERROR`    | Unexpected server error                      |
+| HTTP | Code                          | Meaning                                             |
+| ---- | ----------------------------- | --------------------------------------------------- |
+| 400  | `INVALID_JSON`                | Malformed JSON body                                 |
+| 401  | `UNAUTHENTICATED`             | Missing, expired, or invalid Access token           |
+| 404  | `NOT_FOUND`                   | Resource absent or not owned by current user        |
+| 409  | `CONFLICT`                    | Unique-name or state-transition conflict            |
+| 413  | `PAYLOAD_TOO_LARGE`           | Request exceeds configured limit                    |
+| 422  | `VALIDATION_ERROR`            | Structurally valid JSON with invalid fields         |
+| 422  | `UNSUPPORTED_ARCHIVE_VERSION` | Archive schema is not the current supported version |
+| 429  | `RATE_LIMITED`                | Request rate exceeded                               |
+| 500  | `INTERNAL_ERROR`              | Unexpected server error                             |
 
 ## 6. Data Types
 
@@ -168,12 +169,15 @@ type User = {
   displayName: string | null;
   timezone: string;
   reportingCurrency: string;
+  onboardingCompletedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
 ```
 
 The API does not expose authentication subject history.
+`onboardingCompletedAt` is an RFC 3339 timestamp after first-run setup is
+completed, or `null` before completion.
 
 ## 7.2 Category
 
@@ -246,6 +250,19 @@ type Subscription = {
 
 ## 8. User Endpoints
 
+### `GET /api/v1/session`
+
+Returns the authenticated application user and the non-secret runtime environment:
+
+```ts
+type Session = {
+  user: User;
+  environment: "local" | "preview" | "production";
+};
+```
+
+This is the browser's canonical bootstrap endpoint.
+
 ### `GET /api/v1/me`
 
 Returns the current application user.
@@ -263,6 +280,14 @@ Request:
 ```
 
 All fields are optional. Changing the time zone triggers next-billing reconciliation for active subscriptions. Changing reporting currency never rewrites an existing subscription amount or currency.
+
+### `POST /api/v1/onboarding/complete`
+
+Accepts no body or an empty JSON object. It idempotently records the first completion
+timestamp and returns the current `User`; later calls preserve the original timestamp.
+
+The Settings UI reads and writes the canonical `/api/v1/me` resource. There is no
+duplicate `/api/v1/settings` API alias.
 
 ## 9. Category Endpoints
 
@@ -341,6 +366,9 @@ Optional query parameters:
 | `currency`        | Uppercase ISO 4217 code                                   |
 | `sort`            | `nextBillingOn` default, `name`, `amount`, or `createdAt` |
 | `order`           | `asc` default or `desc`                                   |
+
+`sort=amount` is accepted only when the request contains exactly one `currency`
+filter. Cross-currency values are never compared as raw stored micro-units.
 
 The server reconciles stale next-billing values before producing the final response.
 
@@ -486,6 +514,7 @@ type Dashboard = {
   paymentMethodBreakdown: Array<{
     paymentMethodId: string | null;
     paymentMethodName: string | null;
+    paymentMethodKind: "card" | "wallet" | "bank" | "store" | "other" | null;
     paymentMethodSymbol: ResourceSymbol;
     subscriptionCount: number;
     reportingMonthlyAverage: string | null;
@@ -519,6 +548,9 @@ Validates an archive without writing business data and returns:
 - Warnings and unsupported fields.
 - Detected conflicts.
 - A SHA-256 digest of the server's canonical serialization of the validated archive.
+
+An integer `schemaVersion` other than the current version returns
+`UNSUPPORTED_ARCHIVE_VERSION` before archive-field validation.
 
 ### `POST /api/v1/imports`
 
@@ -557,6 +589,10 @@ Each request receives a request ID. Structured logs may include:
 - Internal user ID or a one-way hash when necessary for debugging.
 - Stable application error code.
 
+Request logs use the registered route template, such as
+`/api/v1/subscriptions/:id`, never the concrete request path. Unexpected failures are
+recorded only as `INTERNAL_ERROR`; raw exception messages are not persisted.
+
 Logs must not include:
 
 - Access JWTs or cookies.
@@ -564,6 +600,7 @@ Logs must not include:
 - Subscription notes.
 - Payment method labels.
 - Import archive contents.
+- Concrete resource identifiers embedded in request paths.
 
 ## 17. Contract Testing
 

@@ -71,7 +71,12 @@ export type AppSubscription = {
 
 export type AppDashboardSubscription = AppSubscription & {
   category: { id: string; name: string; color: string; symbol: ResourceSymbol } | null;
-  paymentMethod: { id: string; name: string; symbol: ResourceSymbol } | null;
+  paymentMethod: {
+    id: string;
+    name: string;
+    kind: PaymentMethodKind;
+    symbol: ResourceSymbol;
+  } | null;
 };
 
 export type SubscriptionListFilter = {

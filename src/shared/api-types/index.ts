@@ -126,6 +126,7 @@ export type CategoryBreakdown = {
 export type PaymentMethodBreakdown = {
   paymentMethodId: string | null;
   paymentMethodName: string | null;
+  paymentMethodKind: PaymentMethodKind | null;
   paymentMethodSymbol: ResourceSymbol;
   subscriptionCount: number;
   reportingMonthlyAverage: string | null;

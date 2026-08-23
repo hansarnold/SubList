@@ -113,6 +113,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
           now,
         )
         .run();
+      logIdentityRelink(userWithEmail.id, identity.provider);
       return mapUserRow(userWithEmail);
     }
 
@@ -152,7 +153,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         .bind(emailNormalized)
         .first<UserRow>();
       if (racedUser === null) throw error;
-      await this.db
+      const relink = await this.db
         .prepare(
           `INSERT OR IGNORE INTO auth_identities (
              provider, subject, user_id, email, email_normalized, created_at, last_seen_at
@@ -168,6 +169,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
           now,
         )
         .run();
+      if (relink.meta.changes > 0) logIdentityRelink(racedUser.id, identity.provider);
       const resolved = await this.findUserByIdentity(identity);
       if (resolved === null) throw error;
       return mapUserRow(resolved);
@@ -533,6 +535,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
                 c.symbol_type AS category_symbol_type,
                 c.symbol_value AS category_symbol_value,
                 p.name AS payment_method_name,
+                p.kind AS payment_method_kind,
                 p.symbol_type AS payment_method_symbol_type,
                 p.symbol_value AS payment_method_symbol_value
          FROM subscriptions s
@@ -662,23 +665,22 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
 
   async replaceFxSnapshot(snapshot: FxSnapshot): Promise<FxSnapshotReplaceResult> {
     const normalized = canonicalFxSnapshot(snapshot);
-    const existing = await this.getFxSnapshot();
-    if (
-      existing !== null &&
-      existing.provider === normalized.provider &&
-      existing.rateDate >= normalized.rateDate
-    ) {
-      return "unchanged";
-    }
-
     const serializedRates = JSON.stringify(normalized.rates);
-    await this.db.batch([
-      this.db.prepare("DELETE FROM fx_snapshot WHERE id = 1"),
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `DELETE FROM fx_snapshot
+           WHERE id = 1
+             AND (provider <> ? OR rate_date < ?)`,
+        )
+        .bind(normalized.provider, normalized.rateDate),
       this.db
         .prepare(
           `INSERT INTO fx_snapshot (
              id, provider, rate_date, base_currency, fetched_at, rate_count
-           ) VALUES (1, ?, ?, ?, ?, ?)`,
+           )
+           SELECT 1, ?, ?, ?, ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM fx_snapshot WHERE id = 1)`,
         )
         .bind(
           normalized.provider,
@@ -693,11 +695,29 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
            SELECT 1,
                   json_extract(item.value, '$.currency'),
                   json_extract(item.value, '$.unitsPerEur')
-           FROM json_each(?) AS item`,
+           FROM json_each(?) AS item
+           WHERE EXISTS (
+             SELECT 1
+             FROM fx_snapshot
+             WHERE id = 1
+               AND provider = ?
+               AND rate_date = ?
+               AND base_currency = ?
+               AND fetched_at = ?
+               AND rate_count = ?
+           )
+           ON CONFLICT(snapshot_id, currency) DO NOTHING`,
         )
-        .bind(serializedRates),
+        .bind(
+          serializedRates,
+          normalized.provider,
+          normalized.rateDate,
+          normalized.baseCurrency,
+          normalized.fetchedAt,
+          normalized.rates.length,
+        ),
     ]);
-    return "replaced";
+    return (results[1]?.meta.changes ?? 0) > 0 ? "replaced" : "unchanged";
   }
 
   async getImportState(userId: string): Promise<ExistingImportState> {
@@ -936,6 +956,17 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       )
       .bind(now, JSON.stringify(values), userId);
   }
+}
+
+function logIdentityRelink(userId: string, provider: AuthenticatedIdentity["provider"]): void {
+  console.info(
+    JSON.stringify({
+      message: "security_audit",
+      eventCode: "AUTH_IDENTITY_RELINKED",
+      userId,
+      provider,
+    }),
+  );
 }
 
 function escapeLike(value: string): string {

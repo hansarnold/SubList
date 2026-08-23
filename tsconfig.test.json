@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "jsx": "react-jsx",
     "noEmit": true,
     "types": ["vitest/globals", "@cloudflare/vitest-plugin/types", "./worker-configuration.d.ts"]
   },
@@ -19,8 +20,7 @@
     "tests",
     "src/domain",
     "src/shared",
-    "src/web/api/types.ts",
-    "src/web/utils/format.ts",
+    "src/web",
     "src/worker",
     "src/application",
     "src/infrastructure"

@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { constants as fileConstants } from "node:fs";
-import { access, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
 import { z } from "zod";
+import supportedCurrencies from "../../src/shared/supported-currencies.json" with { type: "json" };
 const MAX_ARCHIVE_BYTES = 5 * 1024 * 1024;
 const MAX_SAFE_MICROS = BigInt(Number.MAX_SAFE_INTEGER);
 const MICROS_PER_UNIT = 1000000n;
+const SUPPORTED_CURRENCIES = new Set(supportedCurrencies);
 const COMMON_ICON_KEYS = [
   "bank",
   "bolt",
@@ -52,7 +54,11 @@ const timestampSchema = z.iso.datetime({ offset: true });
 const uuidSchema = z.uuid();
 const currencySchema = z
   .string()
-  .regex(/^[A-Z]{3}$/, "Use a three-letter uppercase currency code.");
+  .regex(/^[A-Z]{3}$/, "Use a three-letter uppercase currency code.")
+  .refine(
+    (value) => SUPPORTED_CURRENCIES.has(value),
+    "Use a supported uppercase ISO 4217 currency code.",
+  );
 const colorSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 const paymentKindSchema = z.enum(["card", "wallet", "bank", "store", "other"]);
 const recurrenceUnitSchema = z.enum(["day", "week", "month", "year"]);
@@ -246,7 +252,8 @@ export async function migrateArchiveFiles(options) {
     sourceBuffer.toString("utf8"),
     symbolMapBuffer?.toString("utf8"),
   );
-  await mkdir(options.outputDirectory, { recursive: true });
+  await mkdir(options.outputDirectory, { recursive: true, mode: 0o700 });
+  await chmod(options.outputDirectory, 0o700);
   const paths = {
     archivePath: joinPath(options.outputDirectory, OUTPUT_FILENAMES.archive),
     reviewPath: joinPath(options.outputDirectory, OUTPUT_FILENAMES.review),
@@ -258,7 +265,7 @@ export async function migrateArchiveFiles(options) {
     [paths.reportPath, artifacts.verificationReportJson],
   ];
   if (options.overwrite === true) {
-    await Promise.all(writes.map(([path, contents]) => writeFile(path, contents, "utf8")));
+    await Promise.all(writes.map(([path, contents]) => writePrivateFile(path, contents)));
   } else {
     await assertAllPathsAbsent(writes.map(([path]) => path));
     await writeAllExclusive(writes);
@@ -682,6 +689,9 @@ function isRealIsoDate(value) {
   return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 function isValidTimeZone(value) {
+  const resemblesNamedTimeZone =
+    value === "UTC" || /^[A-Za-z_+-]+(?:\/[A-Za-z0-9_+.-]+)+$/.test(value);
+  if (!resemblesNamedTimeZone) return false;
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
     return true;
@@ -710,8 +720,9 @@ function formatRelationship(id, names) {
   return `${names.get(id) ?? "Unknown"} [${id}]`;
 }
 function escapeCsv(value) {
-  if (!/[",\r\n]/.test(value)) return value;
-  return `"${value.replaceAll('"', '""')}"`;
+  const spreadsheetSafeValue = /^[=+\-@]/u.test(value) ? `'${value}` : value;
+  if (!/[",\r\n]/.test(spreadsheetSafeValue)) return spreadsheetSafeValue;
+  return `"${spreadsheetSafeValue.replaceAll('"', '""')}"`;
 }
 function sha256(value) {
   return `sha256-${createHash("sha256").update(value).digest("hex")}`;
@@ -755,7 +766,7 @@ async function writeAllExclusive(writes) {
   const handles = [];
   try {
     for (const [path] of writes) {
-      handles.push({ path, handle: await open(path, "wx") });
+      handles.push({ path, handle: await open(path, "wx", 0o600) });
     }
     await Promise.all(
       handles.map(async ({ path, handle }) => {
@@ -774,6 +785,16 @@ async function writeAllExclusive(writes) {
   } finally {
     await Promise.allSettled(handles.map(({ handle }) => handle.close()));
   }
+}
+
+async function writePrivateFile(path, contents) {
+  try {
+    await chmod(path, 0o600);
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+  }
+  await writeFile(path, contents, { encoding: "utf8", mode: 0o600 });
+  await chmod(path, 0o600);
 }
 function isNodeError(value) {
   return value instanceof Error && "code" in value;

@@ -7,6 +7,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, inject, it, vi } from "vitest";
 import type { ExchangeRateProvider } from "../../src/application/fx-service";
 import worker, { createWorker } from "../../src/worker";
+import { createApp } from "../../src/worker/api/app";
 
 const migrations = inject("migrations");
 const ORIGIN = "http://localhost:5173";
@@ -89,6 +90,78 @@ describe("refactor Worker routes", () => {
     expect(response.status).toBe(400);
     const body = await response.json<{ error: { code: string } }>();
     expect(body.error.code).toBe("INVALID_ORIGIN");
+  });
+});
+
+describe("request observability", () => {
+  it("logs a route template and stable code without a concrete resource id or raw error", async () => {
+    const resourceId = "550e8400-e29b-41d4-a716-446655440000";
+    const privateError = "private database and upstream details";
+    const requestLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failingApp = createApp(() => Promise.reject(new Error(privateError)));
+
+    try {
+      const response = await failingApp.fetch(
+        new Request(`${ORIGIN}/api/v1/subscriptions/${resourceId}`, {
+          headers: { "Cf-Ray": "observability-test-request" },
+        }),
+        env,
+        createExecutionContext(),
+      );
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "INTERNAL_ERROR", requestId: "observability-test-request" },
+      });
+
+      const failureRecord = parseLogRecord(errorLog.mock.calls[0]?.[0]);
+      expect(failureRecord).toMatchObject({
+        message: "request_failed",
+        environment: "local",
+        requestId: "observability-test-request",
+        method: "GET",
+        routeTemplate: "/api/v1/subscriptions/:id",
+        status: 500,
+        errorCode: "INTERNAL_ERROR",
+      });
+      expect(failureRecord).not.toHaveProperty("path");
+      expect(failureRecord).not.toHaveProperty("error");
+
+      const completionRecord = parseLogRecord(requestLog.mock.calls[0]?.[0]);
+      expect(completionRecord).toMatchObject({
+        message: "request_complete",
+        routeTemplate: "/api/v1/subscriptions/:id",
+        status: 500,
+        errorCode: "INTERNAL_ERROR",
+      });
+      const serializedLogs = JSON.stringify({ failureRecord, completionRecord });
+      expect(serializedLogs).not.toContain(resourceId);
+      expect(serializedLogs).not.toContain(privateError);
+    } finally {
+      requestLog.mockRestore();
+      errorLog.mockRestore();
+    }
+  });
+
+  it("adds the stable application error code to the completion record", async () => {
+    const requestLog = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      const response = await request("/api/v1/onboarding/complete", { method: "POST" });
+      expect(response.status).toBe(400);
+      const completionRecord = parseLogRecord(requestLog.mock.calls[0]?.[0]);
+      expect(completionRecord).toMatchObject({
+        message: "request_complete",
+        method: "POST",
+        routeTemplate: "/api/v1/onboarding/complete",
+        status: 400,
+        errorCode: "INVALID_ORIGIN",
+      });
+      expect(completionRecord).not.toHaveProperty("path");
+    } finally {
+      requestLog.mockRestore();
+    }
   });
 });
 
@@ -194,4 +267,12 @@ function request(path: string, init?: RequestInit): Promise<Response> {
   return Promise.resolve(
     worker.fetch(new Request(`${ORIGIN}${path}`, init), env, createExecutionContext()),
   );
+}
+
+function parseLogRecord(value: unknown): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(String(value));
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Expected a structured JSON log record.");
+  }
+  return parsed as Record<string, unknown>;
 }

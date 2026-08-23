@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations, createExecutionContext } from "cloudflare:test";
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair, type JWTVerifyGetKey } from "jose";
-import { beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, inject, it, vi } from "vitest";
 import { createApp } from "../../src/worker/api/app";
 import { authenticateRequest, type AuthenticationEnvironment } from "../../src/worker/auth/access";
 
@@ -45,6 +45,21 @@ beforeEach(async () => {
 });
 
 describe("Cloudflare Access authentication", () => {
+  it("accepts the bracketed IPv6 loopback host in local development", async () => {
+    await expect(
+      authenticateRequest(new IncomingRequest("http://[::1]:8787/api/v1/session"), {
+        ENVIRONMENT: "local",
+        PUBLIC_ORIGIN: "http://[::1]:5173",
+        TEAM_DOMAIN: "local.invalid",
+        POLICY_AUD: "local-development",
+      }),
+    ).resolves.toEqual({
+      provider: "local_development",
+      subject: "local-user",
+      email: "developer@localhost.invalid",
+    });
+  });
+
   it("accepts a signed application token and derives the server-side identity", async () => {
     let requestedKeySetUrl = "";
     const identity = await authenticateRequest(
@@ -109,6 +124,50 @@ describe("Cloudflare Access authentication", () => {
       await expectUnauthenticated(response, testCase.name);
     }
     expect(await userCount()).toBe(0);
+  });
+
+  it("audits verified-email identity relinking without identity claims or JWTs", async () => {
+    const email = "stable-mailbox@example.invalid";
+    const originalSubject = "original-access-subject";
+    const replacementSubject = "replacement-access-subject";
+    const originalToken = await accessToken({ subject: originalSubject, email });
+    const replacementToken = await accessToken({ subject: replacementSubject, email });
+    const auditLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      const firstSession = await responseData<{ user: { id: string } }>(
+        await remoteRequest("/api/v1/session", originalToken),
+      );
+      expect(auditLog).not.toHaveBeenCalled();
+
+      const relinkedSession = await responseData<{ user: { id: string } }>(
+        await remoteRequest("/api/v1/session", replacementToken),
+      );
+      expect(relinkedSession.user.id).toBe(firstSession.user.id);
+      expect(await userCount()).toBe(1);
+      expect(await identityCount()).toBe(2);
+
+      await responseData(await remoteRequest("/api/v1/session", replacementToken));
+      expect(auditLog).toHaveBeenCalledTimes(1);
+      const serializedEvent = String(auditLog.mock.calls[0]?.[0]);
+      expect(JSON.parse(serializedEvent)).toEqual({
+        message: "security_audit",
+        eventCode: "AUTH_IDENTITY_RELINKED",
+        userId: firstSession.user.id,
+        provider: "cloudflare_access",
+      });
+      for (const privateValue of [
+        email,
+        originalSubject,
+        replacementSubject,
+        originalToken,
+        replacementToken,
+      ]) {
+        expect(serializedEvent).not.toContain(privateValue);
+      }
+    } finally {
+      auditLog.mockRestore();
+    }
   });
 });
 
@@ -424,4 +483,8 @@ async function expectLifecycleStatus(
 
 async function userCount(): Promise<number | null> {
   return env.DB.prepare("SELECT COUNT(*) AS count FROM users").first<number>("count");
+}
+
+async function identityCount(): Promise<number | null> {
+  return env.DB.prepare("SELECT COUNT(*) AS count FROM auth_identities").first<number>("count");
 }

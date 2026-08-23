@@ -86,6 +86,7 @@ export type DashboardSubscriptionRow = SubscriptionRow & {
   category_symbol_type: string | null;
   category_symbol_value: string | null;
   payment_method_name: string | null;
+  payment_method_kind: PaymentMethodKind | null;
   payment_method_symbol_type: string | null;
   payment_method_symbol_value: string | null;
 };
@@ -186,6 +187,7 @@ export function mapDashboardSubscriptionRow(
         : {
             id: row.payment_method_id,
             name: row.payment_method_name,
+            kind: row.payment_method_kind ?? "other",
             symbol: mapStoredResourceSymbol(
               row.payment_method_symbol_type,
               row.payment_method_symbol_value,

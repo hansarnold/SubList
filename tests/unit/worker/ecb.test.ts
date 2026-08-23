@@ -51,6 +51,13 @@ describe("ECB CSV adapter", () => {
     expect(result.rates.some((rate) => rate.currency === "ARS")).toBe(false);
   });
 
+  it("ignores valid provider currencies outside the application allow-list", () => {
+    const result = parseEcbCsv(validCsv([rateRow("ATS", "1998-12-31", "13.7603")]));
+
+    expect(result.rates.some((rate) => rate.currency === "ATS")).toBe(false);
+    expect(result.rates.find((rate) => rate.currency === "USD")?.unitsPerEur).toBe("19.25");
+  });
+
   it("rejects duplicate, non-positive, malformed, and incomplete latest snapshots", () => {
     expect(() => parseEcbCsv(validCsv([rateRow("USD")]))).toThrow(EcbProviderError);
     expect(() =>
@@ -62,6 +69,7 @@ describe("ECB CSV adapter", () => {
       ),
     ).toThrow(EcbProviderError);
     expect(() => parseEcbCsv("FREQ,CURRENCY\nD,USD")).toThrow(EcbProviderError);
+    expect(() => parseEcbCsv(validCsv([rateRow("USDX")]))).toThrow(EcbProviderError);
     expect(() =>
       parseEcbCsv(
         validCsv().replace(

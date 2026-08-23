@@ -75,14 +75,14 @@ The user may skip display-name entry and all category choices. Recommended categ
 
 ## 6.1 Information Order
 
-1. Next charge.
-2. Charges due in the next 30 days.
-3. Combined reporting-currency estimates for monthly average, annualized cost, current-month charges, and current-year charges.
-4. Exact original-currency summaries and FX source/date state.
+1. Combined reporting-currency estimates for monthly average, annualized cost, current-month charges, and current-year charges, with FX source/date state.
+2. Next charge and charges due in the selected upcoming window.
+3. Grouped upcoming-charge agenda.
+4. Exact original-currency summaries.
 5. Category and payment-method breakdowns.
 6. Recent or newly added subscriptions when useful.
 
-At wide browser widths, the upcoming-charge agenda is the dominant content area. Summary information supports the agenda rather than competing with it as a dense analytics dashboard.
+At wide browser widths, the four reporting-currency estimates form the prominent first summary row. The upcoming-charge agenda follows as the primary detailed content area, without turning the page into a dense analytics dashboard.
 
 ## 6.2 Multiple Currencies
 
@@ -412,7 +412,7 @@ This image is the selected visual reference for the authenticated wide-browser `
 - The same responsive web application shell, persistent navigation, typography, spacing, surface treatment, and Add Subscription action used by the selected Subscriptions prototype.
 - `Overview` as the visible localized English label for the Dashboard route.
 - Combined reporting-currency estimates with visible rate metadata, plus original-currency summaries.
-- A 30-day renewal agenda as the dominant content area, with a secondary 7-day view.
+- A 30-day renewal agenda following the prominent reporting summary, with a secondary 7-day view.
 - Original-currency details and restrained amount-based category and payment-method breakdowns.
 - A compact first viewport that favors lists and direct values over decorative charts.
 

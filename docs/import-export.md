@@ -389,6 +389,10 @@ fields, invalid version-1 records, duplicate IDs or normalized category names,
 broken relationships, inconsistent lifecycle fields, and invalid mapping entries
 before it writes any artifact.
 
+Currency validation uses the same supported ISO-code registry as the runtime import
+path. Time zones must be `UTC` or a valid named IANA zone such as `Asia/Shanghai`;
+aliases such as `GMT` that runtime canonicalization rejects also fail transformation.
+
 Symbols are opt-in. The tool never guesses them from a resource name. An operator may
 provide a strict mapping file:
 
@@ -414,6 +418,11 @@ Existing output files cause `OUTPUT_EXISTS`; no file is overwritten by default. 
 `--overwrite` only for an intentional replacement of the three known artifacts. The
 source archive, mapping file, transformed archive, CSV, verification report, and D1
 backup may all contain private data and must remain outside the repository.
+
+The operator tool sets the output directory to owner-only mode (`0700`) and every
+generated or overwritten artifact to owner-read/write mode (`0600`). Text cells that
+begin with `=`, `+`, `-`, or `@` are prefixed with an apostrophe in the review CSV so
+spreadsheet applications treat untrusted resource names as text rather than formulas.
 
 ## 16. Native SubList Adapter
 

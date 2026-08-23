@@ -39,6 +39,7 @@ export interface DashboardCategory {
 export interface DashboardPaymentMethod {
   readonly id: string;
   readonly name: string;
+  readonly kind: "card" | "wallet" | "bank" | "store" | "other";
   readonly symbol: ResourceSymbol;
 }
 
@@ -80,6 +81,7 @@ export interface DashboardBreakdown {
   readonly name: string | null;
   readonly color: string | null;
   readonly symbol: ResourceSymbol;
+  readonly paymentMethodKind: DashboardPaymentMethod["kind"] | null;
   readonly subscriptionCount: number;
   readonly totalsByCurrency: ExactCurrencyTotals[];
 }
@@ -105,6 +107,7 @@ interface MutableBreakdown {
   readonly name: string | null;
   readonly color: string | null;
   readonly symbol: ResourceSymbol;
+  readonly paymentMethodKind: DashboardPaymentMethod["kind"] | null;
   subscriptionCount: number;
   readonly totalsByCurrency: Map<CurrencyCode, MutableCurrencyTotals>;
 }
@@ -165,6 +168,7 @@ export function buildDashboardStatistics(
       subscription.category?.name ?? null,
       subscription.category?.color ?? null,
       subscription.category?.symbol ?? null,
+      null,
     );
     addSubscriptionToBreakdown(categoryGroup, subscription.currency, normalized);
 
@@ -174,6 +178,7 @@ export function buildDashboardStatistics(
       subscription.paymentMethod?.name ?? null,
       null,
       subscription.paymentMethod?.symbol ?? null,
+      subscription.paymentMethod?.kind ?? null,
     );
     addSubscriptionToBreakdown(paymentMethodGroup, subscription.currency, normalized);
 
@@ -267,6 +272,7 @@ function getOrCreateBreakdown(
   name: string | null,
   color: string | null,
   symbol: ResourceSymbol,
+  paymentMethodKind: DashboardPaymentMethod["kind"] | null,
 ): MutableBreakdown {
   const existing = map.get(id);
   if (existing) {
@@ -278,6 +284,7 @@ function getOrCreateBreakdown(
     name,
     color,
     symbol,
+    paymentMethodKind,
     subscriptionCount: 0,
     totalsByCurrency: new Map(),
   };
@@ -332,6 +339,7 @@ function finalizeBreakdowns(
       name: breakdown.name,
       color: breakdown.color,
       symbol: breakdown.symbol,
+      paymentMethodKind: breakdown.paymentMethodKind,
       subscriptionCount: breakdown.subscriptionCount,
       totalsByCurrency: finalizeCurrencyTotals(breakdown.totalsByCurrency),
     }));

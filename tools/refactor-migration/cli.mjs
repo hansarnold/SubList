@@ -38,15 +38,16 @@ try {
 }
 
 function parseArguments(args) {
+  const forwardedArguments = args[0] === "--" ? args.slice(1) : args;
   const result = { overwrite: false, help: false };
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
+  for (let index = 0; index < forwardedArguments.length; index += 1) {
+    const argument = forwardedArguments[index];
     if (argument === "--help") {
       result.help = true;
     } else if (argument === "--overwrite") {
       result.overwrite = true;
     } else if (argument === "--input" || argument === "--output-dir" || argument === "--symbols") {
-      const value = args[index + 1];
+      const value = forwardedArguments[index + 1];
       if (value === undefined || value.startsWith("--")) {
         throw new Error(`${argument} requires a value.\n\n${USAGE}`);
       }

@@ -19,6 +19,7 @@ import { api } from "../../api/client";
 import type {
   Category as CategoryType,
   CommonIconKey,
+  ImportResult,
   PaymentMethodKind,
   ResourceSymbol,
   Session,
@@ -873,9 +874,7 @@ export function DataSettingsPage() {
             {importMutation.isError ? (
               <InlineNotice tone="danger">{importMutation.error.message}</InlineNotice>
             ) : null}
-            {importMutation.isSuccess ? (
-              <InlineNotice tone="success">{t("settings.importComplete")}</InlineNotice>
-            ) : null}
+            {importMutation.isSuccess ? <ImportResultSummary result={importMutation.data} /> : null}
             <Button disabled={importMutation.isPending} onClick={() => importMutation.mutate()}>
               {importMutation.isPending ? t("settings.importing") : t("settings.confirmImport")}
             </Button>
@@ -883,5 +882,44 @@ export function DataSettingsPage() {
         ) : null}
       </section>
     </div>
+  );
+}
+
+function importResourceCount(
+  counts: ImportResult["created"] | ImportResult["updated"] | ImportResult["skipped"],
+): number {
+  return counts.categories + counts.paymentMethods + counts.subscriptions;
+}
+
+export function ImportResultSummary({ result }: { result: ImportResult }) {
+  const { t } = useTranslation();
+  const counts = [
+    { label: t("settings.created"), value: importResourceCount(result.created) },
+    { label: t("settings.updated"), value: importResourceCount(result.updated) },
+    { label: t("settings.skipped"), value: importResourceCount(result.skipped) },
+    { label: t("settings.warnings"), value: result.warnings.length },
+  ];
+
+  return (
+    <section className="import-result" role="status" aria-live="polite">
+      <InlineNotice tone="success">
+        <strong>{t("settings.importComplete")}</strong>
+      </InlineNotice>
+      <div className="import-result__counts">
+        {counts.map((count) => (
+          <div key={count.label}>
+            <span>{count.label}</span>
+            <strong>{count.value}</strong>
+          </div>
+        ))}
+      </div>
+      {result.warnings.length ? (
+        <ul>
+          {result.warnings.map((warning, index) => (
+            <li key={`${warning.path}-${warning.code}-${index}`}>{warning.message}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
