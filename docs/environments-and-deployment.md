@@ -308,7 +308,8 @@ On 2026-08-23:
 - Worker version `f07dad0c-6126-42e8-86df-1a9a9ff1e283` was deployed to `sublist.hansarnold.uk`.
 - Anonymous requests to `/`, `/health`, and `/api/v1/session` were redirected to the correct Access application.
 - Both the `workers.dev` route and version preview URLs were verified disabled.
-- The authenticated OTP, Worker JWT, and first-user provisioning smoke test remains pending.
+- An authenticated OTP login succeeded, the Worker accepted the verified Access JWT, and the first production user was provisioned.
+- The hosted subscription create, edit, archive, and unarchive smoke test remains pending.
 
 ## 17. Official References
 

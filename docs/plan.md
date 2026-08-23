@@ -6,7 +6,7 @@
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 2 in progress; authenticated production smoke test pending
+> Current phase: Phase 2 in progress; hosted lifecycle smoke test pending
 
 ## 1. Project Overview
 
@@ -245,7 +245,8 @@ Completion criterion: The maintainer can manage all subscriptions locally.
 - [x] Configure Access OTP, the initial email allowlist, and the real production audience.
 - [x] Apply production migrations and deploy the Worker to `sublist.hansarnold.uk`.
 - [x] Verify unauthenticated Access redirects and the absence of alternate Worker entry points.
-- [ ] Complete the authenticated OTP, JWT validation, and first-user provisioning smoke test.
+- [x] Complete the authenticated OTP, JWT validation, and first-user provisioning smoke test.
+- [ ] Complete a hosted subscription create, edit, archive, and unarchive smoke test.
 - [ ] Add isolated preview D1, hostname, and Access resources before regular preview releases begin.
 - [x] Prevent public entry points and accidental local-auth configuration from bypassing Access.
 - [x] Add structured logging, stable error handling, and backup documentation.

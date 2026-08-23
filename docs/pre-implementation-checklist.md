@@ -1,6 +1,6 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: First hosted production deployment online; authenticated smoke test pending
+> Status: First hosted production deployment online; lifecycle smoke test pending
 > Last updated: 2026-08-23
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
@@ -156,8 +156,9 @@ These inputs do not block local use:
 - [x] Create and bind the isolated production D1 database.
 - [x] Configure the production Access OTP application and initial approved email policy.
 - [x] Apply production migrations and deploy the production Worker and custom hostname.
+- [x] Verify OTP login, Access JWT validation, and first-user provisioning in production.
 - [ ] Provision equivalent isolated preview resources before enabling preview releases.
 
 ## 12. Next Delivery Step
 
-Complete the first authenticated OTP login and hosted create/edit/archive smoke test. Provision preview resources before the next release cycle.
+Complete the hosted subscription create/edit/archive/unarchive smoke test. Provision preview resources before the next release cycle.
