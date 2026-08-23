@@ -510,6 +510,147 @@ button:disabled,
   background: var(--category-color);
 }
 
+.category-pill__symbol {
+  color: var(--category-color);
+}
+
+.service-mark--symbol .resource-symbol {
+  color: color-mix(in srgb, var(--service-color), var(--text) 20%);
+}
+
+.resource-symbol--emoji {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+}
+
+.resource-symbol--icon,
+.resource-symbol--payment-fallback {
+  color: currentColor;
+}
+
+.symbol-picker {
+  display: grid;
+  min-width: 0;
+  gap: 13px;
+  padding: 0;
+  border: 0;
+}
+
+.symbol-picker__legend {
+  margin-bottom: 7px;
+  color: var(--text-soft);
+  font-size: 0.87rem;
+  font-weight: 590;
+}
+
+.symbol-picker__tabs {
+  display: inline-flex;
+  width: fit-content;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.symbol-picker__tabs button {
+  min-height: 36px;
+  padding-inline: 13px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-soft);
+}
+
+.symbol-picker__tabs button:first-child {
+  border-left: 0;
+}
+
+.symbol-picker__tabs button[aria-selected="true"] {
+  background: var(--brand-soft);
+  color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
+
+.symbol-picker__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.symbol-picker__choice {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.symbol-picker__choice:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+.symbol-picker__choice:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.symbol-picker__choice input {
+  position: absolute;
+  opacity: 0;
+}
+
+.symbol-picker__choice > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.symbol-picker__emoji {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  font-size: 1.25rem;
+}
+
+.symbol-picker__emoji-input {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.symbol-picker__error {
+  color: var(--danger);
+  font-size: 0.79rem;
+}
+
+.symbol-picker__clear {
+  width: fit-content;
+  min-height: 36px;
+  padding-inline: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+}
+
+.resource-form > .symbol-picker {
+  grid-column: 1 / -1;
+}
+
 .status-badge {
   display: inline-flex;
   width: fit-content;
@@ -920,7 +1061,10 @@ button:disabled,
 
 .dashboard-agenda,
 .dashboard-estimates,
-.category-breakdown {
+.category-breakdown,
+.reporting-estimates,
+.original-estimates,
+.payment-breakdown {
   padding: 24px;
 }
 
@@ -1132,6 +1276,165 @@ button:disabled,
   margin-top: 23px;
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+.reporting-estimates__currency {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.reporting-estimates__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 18px 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--border);
+}
+
+.reporting-estimate {
+  display: grid;
+  min-height: 100px;
+  align-content: space-between;
+  gap: 12px;
+  padding: 15px;
+  background: var(--surface-raised);
+}
+
+.reporting-estimate > span,
+.reporting-value--missing {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.reporting-estimate__amount {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.reporting-estimate__amount strong {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+}
+
+.reporting-estimate__amount small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.fx-status {
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.original-estimates {
+  margin-top: 30px;
+}
+
+.original-estimates > h2,
+.payment-breakdown > h2 {
+  margin-bottom: 20px;
+}
+
+.original-estimates__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.original-currency-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.original-currency-card header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 13px;
+}
+
+.original-currency-card .currency-orb {
+  width: 34px;
+  height: 34px;
+  font-size: 0.95rem;
+}
+
+.original-currency-card dl {
+  display: grid;
+  gap: 8px;
+}
+
+.original-currency-card dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.original-currency-card dt {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.original-currency-card dd {
+  font-size: 0.86rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 30px;
+  margin-top: 30px;
+}
+
+.breakdown-label,
+.breakdown-value {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.breakdown-value {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.payment-breakdown__items {
+  display: grid;
+}
+
+.payment-breakdown__item {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 0.84rem;
+}
+
+.payment-breakdown__item:last-child {
+  border-bottom: 0;
 }
 
 /* Subscription collection */
@@ -1524,6 +1827,12 @@ button:disabled,
 
 .subscription-table__service small {
   color: var(--text-muted);
+}
+
+.subscription-table__payment {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .subscription-table__actions {
@@ -2220,7 +2529,7 @@ button:disabled,
   }
 
   .dashboard-grid__side {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
 
   .subscription-grid {
@@ -2376,8 +2685,16 @@ button:disabled,
   .dashboard-summary__totals,
   .dashboard-agenda,
   .dashboard-estimates,
-  .category-breakdown {
+  .category-breakdown,
+  .reporting-estimates,
+  .original-estimates,
+  .payment-breakdown {
     padding: 20px;
+  }
+
+  .breakdown-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
   }
 
   .dashboard-grid__side {
@@ -2521,7 +2838,9 @@ button:disabled,
   }
 
   .dashboard-summary,
-  .dashboard-grid {
+  .dashboard-grid,
+  .original-estimates,
+  .breakdown-grid {
     margin-inline: -2px;
   }
 
@@ -2529,8 +2848,19 @@ button:disabled,
   .dashboard-summary__totals,
   .dashboard-agenda,
   .dashboard-estimates,
-  .category-breakdown {
+  .category-breakdown,
+  .reporting-estimates,
+  .original-estimates,
+  .payment-breakdown {
     padding: 17px;
+  }
+
+  .reporting-estimates__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .original-estimates__grid {
+    grid-template-columns: 1fr;
   }
 
   .currency-total-grid {

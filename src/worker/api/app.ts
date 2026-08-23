@@ -1,11 +1,14 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { ApplicationError } from "../../application/errors";
+import { ExchangeRateRefreshService } from "../../application/fx-service";
 import type { AppUser } from "../../application/models";
 import { OpenSubListsService, toApiUser } from "../../application/service";
 import { DomainValidationError, assertCurrencyCode } from "../../domain";
 import type { ApiError, Session } from "../../shared/api-types";
 import {
+  completeOnboardingSchema,
+  createCategoriesBatchSchema,
   createCategorySchema,
   createPaymentMethodSchema,
   createSubscriptionSchema,
@@ -19,6 +22,7 @@ import {
 } from "../../shared/api-types/schemas";
 import { authenticateRequest } from "../auth/access";
 import { D1OpenSubListsRepository } from "../db/repository";
+import { EcbExchangeRateProvider } from "../fx/ecb";
 import { CRUD_BODY_LIMIT, IMPORT_BODY_LIMIT, parseJsonBody } from "./http";
 
 type Variables = {
@@ -68,7 +72,12 @@ export function createApp(
   app.use("/api/v1/*", async (context, next) => {
     enforceSameOrigin(context.req.method, context.req.header("Origin"), context.env.PUBLIC_ORIGIN);
     const repository = new D1OpenSubListsRepository(context.env.DB);
-    const service = new OpenSubListsService(repository);
+    const exchangeRates = new ExchangeRateRefreshService(repository, new EcbExchangeRateProvider());
+    const service = new OpenSubListsService(
+      repository,
+      Date.now,
+      async () => (await exchangeRates.refresh()).snapshot,
+    );
     const identity = await authenticator(context.req.raw, context.env);
     context.set("service", service);
     context.set("user", await service.resolveUser(identity));
@@ -109,6 +118,11 @@ export function createApp(
     }),
   );
 
+  app.post("/api/v1/onboarding/complete", async (context) => {
+    await parseOptionalEmptyJsonBody(context, completeOnboardingSchema);
+    return context.json({ data: await service(context).completeOnboarding(userId(context)) });
+  });
+
   app.get("/api/v1/categories", async (context) => {
     const data = await service(context).listCategories(userId(context));
     return context.json({ data, meta: { count: data.length } });
@@ -120,6 +134,18 @@ export function createApp(
         data: await service(context).createCategory(
           userId(context),
           await parseJsonBody(context, createCategorySchema),
+        ),
+      },
+      201,
+    ),
+  );
+
+  app.post("/api/v1/categories/batch", async (context) =>
+    context.json(
+      {
+        data: await service(context).createCategories(
+          userId(context),
+          await parseJsonBody(context, createCategoriesBatchSchema),
         ),
       },
       201,
@@ -316,6 +342,14 @@ function enforceSameOrigin(method: string, origin: string | undefined, publicOri
   if (origin !== publicOrigin) {
     throw new ApplicationError("INVALID_ORIGIN", "The request origin is not allowed.", 400);
   }
+}
+
+async function parseOptionalEmptyJsonBody(
+  context: Context<AppHono>,
+  schema: typeof completeOnboardingSchema,
+): Promise<Record<string, never>> {
+  if (context.req.raw.body === null) return schema.parse({});
+  return parseJsonBody(context, schema);
 }
 
 function parseSubscriptionFilter(context: Context<AppHono>) {

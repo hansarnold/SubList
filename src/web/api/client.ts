@@ -1,13 +1,16 @@
 import type {
   ApiErrorDetail,
   Category,
+  CategoryInput,
   Dashboard,
   ImportPreview,
   ImportResult,
   PaymentMethod,
+  PaymentMethodInput,
   Session,
   Subscription,
   SubscriptionInput,
+  UpdateUserInput,
   User,
 } from "./types";
 
@@ -99,23 +102,27 @@ function jsonBody(value: unknown): string {
 export const api = {
   session: () => request<Session>("/session"),
   me: () => request<User>("/me"),
-  updateMe: (input: Partial<Pick<User, "displayName" | "timezone" | "defaultCurrency">>) =>
+  updateMe: (input: UpdateUserInput) =>
     request<User>("/me", { method: "PATCH", body: jsonBody(input) }),
+  completeOnboarding: () =>
+    request<User>("/onboarding/complete", { method: "POST", body: jsonBody({}) }),
 
   categories: () => request<Category[]>("/categories"),
-  createCategory: (input: Pick<Category, "name" | "color" | "position">) =>
+  createCategory: (input: CategoryInput) =>
     request<Category>("/categories", { method: "POST", body: jsonBody(input) }),
-  updateCategory: (id: string, input: Partial<Pick<Category, "name" | "color" | "position">>) =>
+  createCategoriesBatch: (categories: CategoryInput[]) =>
+    request<Category[]>("/categories/batch", {
+      method: "POST",
+      body: jsonBody({ categories }),
+    }),
+  updateCategory: (id: string, input: Partial<CategoryInput>) =>
     request<Category>(`/categories/${id}`, { method: "PATCH", body: jsonBody(input) }),
   deleteCategory: (id: string) => request<void>(`/categories/${id}`, { method: "DELETE" }),
 
   paymentMethods: () => request<PaymentMethod[]>("/payment-methods"),
-  createPaymentMethod: (input: Pick<PaymentMethod, "name" | "kind" | "label" | "position">) =>
+  createPaymentMethod: (input: PaymentMethodInput) =>
     request<PaymentMethod>("/payment-methods", { method: "POST", body: jsonBody(input) }),
-  updatePaymentMethod: (
-    id: string,
-    input: Partial<Pick<PaymentMethod, "name" | "kind" | "label" | "position">>,
-  ) =>
+  updatePaymentMethod: (id: string, input: Partial<PaymentMethodInput>) =>
     request<PaymentMethod>(`/payment-methods/${id}`, {
       method: "PATCH",
       body: jsonBody(input),

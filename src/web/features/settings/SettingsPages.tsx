@@ -8,6 +8,7 @@ import {
   IconDatabaseImport,
   IconLanguage,
   IconPlus,
+  IconSparkles,
   IconTrash,
   IconUserCircle,
 } from "@tabler/icons-react";
@@ -15,7 +16,19 @@ import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../../api/client";
-import type { Category as CategoryType, PaymentMethodKind } from "../../api/types";
+import type {
+  Category as CategoryType,
+  CommonIconKey,
+  PaymentMethodKind,
+  ResourceSymbol,
+  Session,
+} from "../../api/types";
+import { CategorySymbol, PaymentMethodSymbol } from "../../components/ResourceSymbol";
+import {
+  SymbolPicker,
+  type EmojiOption,
+  type SymbolPickerLabels,
+} from "../../components/SymbolPicker";
 import {
   Button,
   CategoryPill,
@@ -25,6 +38,14 @@ import {
   LoadingPage,
   QueryError,
 } from "../../components/ui";
+import { COMMON_ICON_KEYS } from "../../../domain/symbol";
+import { normalizeCategoryNameKey } from "../../../domain/text-normalization";
+import {
+  CATEGORY_PRESETS,
+  PAYMENT_METHOD_PRESETS,
+  type CategoryPresetKey,
+  type PaymentMethodPreset,
+} from "../../../shared/presets";
 import { setLanguage } from "../../i18n";
 
 const settingsNav = [
@@ -37,6 +58,39 @@ const settingsNav = [
 function formString(values: FormData, name: string, fallback = "") {
   const value = values.get(name);
   return typeof value === "string" ? value : fallback;
+}
+
+function useSymbolPickerCopy(): {
+  emojiOptions: readonly EmojiOption[];
+  iconLabels: Readonly<Record<CommonIconKey, string>>;
+  labels: SymbolPickerLabels;
+} {
+  const { t } = useTranslation();
+  const iconLabels = Object.fromEntries(
+    COMMON_ICON_KEYS.map((key) => [key, t(`symbols.icons.${key}`)]),
+  ) as Record<CommonIconKey, string>;
+  return {
+    iconLabels,
+    emojiOptions: [
+      { value: "⭐", label: t("symbols.emojis.star") },
+      { value: "🎬", label: t("symbols.emojis.movie") },
+      { value: "🎵", label: t("symbols.emojis.music") },
+      { value: "☁️", label: t("symbols.emojis.cloud") },
+      { value: "💳", label: t("symbols.emojis.card") },
+      { value: "🧾", label: t("symbols.emojis.receipt") },
+      { value: "✈️", label: t("symbols.emojis.travel") },
+      { value: "🛠️", label: t("symbols.emojis.tools") },
+    ],
+    labels: {
+      legend: t("symbols.legend"),
+      commonIcons: t("symbols.commonIcons"),
+      emoji: t("symbols.emoji"),
+      emojiInput: t("symbols.emojiInput"),
+      emojiInputPlaceholder: t("symbols.emojiInputPlaceholder"),
+      invalidEmoji: t("symbols.invalidEmoji"),
+      clear: t("symbols.clear"),
+    },
+  };
 }
 
 export function SettingsLayout() {
@@ -75,6 +129,9 @@ export function ProfileSettingsPage() {
     mutationFn: api.updateMe,
     onSuccess: async (user) => {
       queryClient.setQueryData(["me"], user);
+      queryClient.setQueryData<Session | undefined>(["session"], (current) =>
+        current ? { ...current, user } : current,
+      );
       await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
@@ -93,7 +150,11 @@ export function ProfileSettingsPage() {
     mutation.mutate({
       displayName: formString(values, "displayName").trim() || null,
       timezone: formString(values, "timezone", user.timezone),
-      defaultCurrency: formString(values, "defaultCurrency", user.defaultCurrency).toUpperCase(),
+      reportingCurrency: formString(
+        values,
+        "reportingCurrency",
+        user.reportingCurrency,
+      ).toUpperCase(),
     });
   }
 
@@ -120,11 +181,12 @@ export function ProfileSettingsPage() {
           <Field label={t("settings.timezone")} hint={t("settings.timezoneWarning")}>
             <input name="timezone" defaultValue={user.timezone} required />
           </Field>
-          <Field label={t("settings.defaultCurrency")}>
+          <Field label={t("settings.reportingCurrency")}>
             <input
-              name="defaultCurrency"
+              name="reportingCurrency"
               maxLength={3}
-              defaultValue={user.defaultCurrency}
+              pattern="[A-Za-z]{3}"
+              defaultValue={user.reportingCurrency}
               required
             />
           </Field>
@@ -180,25 +242,62 @@ export function CategorySettingsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["categories"], queryFn: api.categories });
+  const symbolPicker = useSymbolPickerCopy();
   const [editing, setEditing] = useState<CategoryType | null>(null);
   const [deleting, setDeleting] = useState<CategoryType | null>(null);
+  const [symbol, setSymbol] = useState<ResourceSymbol>(null);
+  const [formRevision, setFormRevision] = useState(0);
+  const [selectedPresetKeys, setSelectedPresetKeys] = useState<ReadonlySet<CategoryPresetKey>>(
+    () => new Set(),
+  );
   const mutation = useMutation({
     mutationFn: ({
       id,
       name,
       color,
+      symbol,
       position,
     }: {
       id: string | undefined;
       name: string;
       color: string;
+      symbol: ResourceSymbol;
       position: number;
     }) =>
       id
-        ? api.updateCategory(id, { name, color, position })
-        : api.createCategory({ name, color, position }),
+        ? api.updateCategory(id, { name, color, symbol, position })
+        : api.createCategory({ name, color, symbol, position }),
     onSuccess: async () => {
       setEditing(null);
+      setSymbol(null);
+      setFormRevision((value) => value + 1);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["categories"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+      ]);
+    },
+  });
+  const presetMutation = useMutation({
+    mutationFn: (presetKeys: readonly CategoryPresetKey[]) => {
+      const existingNames = new Set(
+        (query.data ?? []).map((category) => normalizeCategoryNameKey(category.name)),
+      );
+      const categories = CATEGORY_PRESETS.filter((preset) => presetKeys.includes(preset.key))
+        .map((preset) => ({
+          name: t(preset.labelKey),
+          color: preset.color,
+          symbol: preset.symbol,
+        }))
+        .filter((preset) => !existingNames.has(normalizeCategoryNameKey(preset.name)))
+        .map((preset, index) => ({
+          ...preset,
+          position: (query.data?.length ?? 0) + index,
+        }));
+      return api.createCategoriesBatch(categories);
+    },
+    onSuccess: async () => {
+      setSelectedPresetKeys(new Set());
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["categories"] }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
@@ -221,6 +320,14 @@ export function CategorySettingsPage() {
   if (query.isPending) return <LoadingPage variant="form" />;
   if (query.isError) return <QueryError error={query.error} onRetry={() => void query.refetch()} />;
   const categories = query.data;
+  const existingNames = new Set(
+    categories.map((category) => normalizeCategoryNameKey(category.name)),
+  );
+  const selectedPresets = CATEGORY_PRESETS.filter(
+    (preset) =>
+      selectedPresetKeys.has(preset.key) &&
+      !existingNames.has(normalizeCategoryNameKey(t(preset.labelKey))),
+  );
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -229,9 +336,29 @@ export function CategorySettingsPage() {
       id: editing?.id,
       name: formString(values, "name"),
       color: formString(values, "color", "#3b82f6"),
+      symbol,
       position: editing?.position ?? categories.length,
     });
-    if (!editing) event.currentTarget.reset();
+  }
+
+  function togglePreset(key: CategoryPresetKey) {
+    setSelectedPresetKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function startEditing(category: CategoryType) {
+    setEditing(category);
+    setSymbol(category.symbol);
+  }
+
+  function cancelEditing() {
+    setEditing(null);
+    setSymbol(null);
+    setFormRevision((value) => value + 1);
   }
 
   return (
@@ -242,18 +369,66 @@ export function CategorySettingsPage() {
           <p>{t("settings.categoriesIntro")}</p>
         </div>
       </header>
-      {mutation.isError || deleteMutation.isError ? (
+      {mutation.isError || presetMutation.isError || deleteMutation.isError ? (
         <InlineNotice tone="danger">
-          {(mutation.error ?? deleteMutation.error)?.message}
+          {(mutation.error ?? presetMutation.error ?? deleteMutation.error)?.message}
         </InlineNotice>
       ) : null}
-      <form className="resource-form" onSubmit={submit} key={editing?.id ?? "new"}>
+
+      <section className="settings-form" aria-labelledby="category-presets-title">
+        <header className="settings-panel__header">
+          <div>
+            <h3 id="category-presets-title">{t("settings.categoryPresets")}</h3>
+            <p>{t("settings.categoryPresetsIntro")}</p>
+          </div>
+          <IconSparkles size={21} aria-hidden="true" />
+        </header>
+        <div className="resource-list">
+          {CATEGORY_PRESETS.map((preset) => {
+            const name = t(preset.labelKey);
+            const exists = existingNames.has(normalizeCategoryNameKey(name));
+            return (
+              <label className="resource-row checkbox-field" key={preset.key}>
+                <input
+                  type="checkbox"
+                  checked={selectedPresetKeys.has(preset.key) && !exists}
+                  disabled={exists || presetMutation.isPending}
+                  onChange={() => togglePreset(preset.key)}
+                />
+                <CategorySymbol symbol={preset.symbol} color={preset.color} size={22} />
+                <span>
+                  <strong>{name}</strong>
+                  <small>
+                    {exists ? t("settings.presetAlreadyAdded") : t("settings.presetReady")}
+                  </small>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="settings-form__actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={selectedPresets.length === 0 || presetMutation.isPending}
+            onClick={() => presetMutation.mutate(selectedPresets.map((preset) => preset.key))}
+          >
+            <IconPlus size={18} />
+            {presetMutation.isPending
+              ? t("app.saving")
+              : t("settings.addSelectedPresets", { count: selectedPresets.length })}
+          </Button>
+        </div>
+      </section>
+
+      <form className="resource-form" onSubmit={submit} key={editing?.id ?? `new-${formRevision}`}>
         <Field label={t("settings.categoryName")}>
           <input name="name" maxLength={80} defaultValue={editing?.name ?? ""} required />
         </Field>
         <Field label={t("settings.color")}>
           <input name="color" type="color" defaultValue={editing?.color ?? "#3b82f6"} />
         </Field>
+        <SymbolPicker value={symbol} onChange={setSymbol} {...symbolPicker} />
         <Button type="submit" disabled={mutation.isPending}>
           {editing ? (
             t("app.save")
@@ -265,7 +440,7 @@ export function CategorySettingsPage() {
           )}
         </Button>
         {editing ? (
-          <Button variant="ghost" onClick={() => setEditing(null)}>
+          <Button variant="ghost" onClick={cancelEditing}>
             {t("app.cancel")}
           </Button>
         ) : null}
@@ -274,9 +449,9 @@ export function CategorySettingsPage() {
         {categories.length ? (
           categories.map((category) => (
             <div className="resource-row" key={category.id}>
-              <CategoryPill name={category.name} color={category.color} />
+              <CategoryPill name={category.name} color={category.color} symbol={category.symbol} />
               <div className="resource-row__actions">
-                <Button variant="ghost" onClick={() => setEditing(category)}>
+                <Button variant="ghost" onClick={() => startEditing(category)}>
                   {t("app.edit")}
                 </Button>
                 <button
@@ -312,8 +487,16 @@ export function PaymentMethodSettingsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["payment-methods"], queryFn: api.paymentMethods });
+  const symbolPicker = useSymbolPickerCopy();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [symbol, setSymbol] = useState<ResourceSymbol>(null);
+  const [formRevision, setFormRevision] = useState(0);
+  const [presetDraft, setPresetDraft] = useState<{
+    preset: PaymentMethodPreset;
+    name: string;
+    revision: number;
+  } | null>(null);
   const editing = query.data?.find((payment) => payment.id === editingId) ?? null;
   const deleting = query.data?.find((payment) => payment.id === deletingId) ?? null;
   const mutation = useMutation({
@@ -322,6 +505,7 @@ export function PaymentMethodSettingsPage() {
       name: string;
       kind: PaymentMethodKind;
       label: string | null;
+      symbol: ResourceSymbol;
       position: number;
     }) =>
       input.id
@@ -329,19 +513,25 @@ export function PaymentMethodSettingsPage() {
             name: input.name,
             kind: input.kind,
             label: input.label,
+            symbol: input.symbol,
             position: input.position,
           })
         : api.createPaymentMethod({
             name: input.name,
             kind: input.kind,
             label: input.label,
+            symbol: input.symbol,
             position: input.position,
           }),
     onSuccess: async () => {
       setEditingId(null);
+      setPresetDraft(null);
+      setSymbol(null);
+      setFormRevision((value) => value + 1);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["payment-methods"] }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
   });
@@ -368,9 +558,31 @@ export function PaymentMethodSettingsPage() {
       name: formString(values, "name"),
       kind: formString(values, "kind", "card") as PaymentMethodKind,
       label: formString(values, "label").trim() || null,
+      symbol,
       position: editing?.position ?? paymentMethods.length,
     });
-    if (!editing) event.currentTarget.reset();
+  }
+
+  function selectPreset(preset: PaymentMethodPreset) {
+    setEditingId(null);
+    setSymbol(preset.symbol);
+    setPresetDraft({ preset, name: t(preset.labelKey), revision: formRevision + 1 });
+    setFormRevision((value) => value + 1);
+  }
+
+  function startEditing(id: string) {
+    const paymentMethod = paymentMethods.find((payment) => payment.id === id);
+    if (!paymentMethod) return;
+    setPresetDraft(null);
+    setEditingId(id);
+    setSymbol(paymentMethod.symbol);
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setPresetDraft(null);
+    setSymbol(null);
+    setFormRevision((value) => value + 1);
   }
 
   return (
@@ -386,17 +598,50 @@ export function PaymentMethodSettingsPage() {
           {(mutation.error ?? deleteMutation.error)?.message}
         </InlineNotice>
       ) : null}
+
+      <section className="settings-form" aria-labelledby="payment-presets-title">
+        <header className="settings-panel__header">
+          <div>
+            <h3 id="payment-presets-title">{t("settings.paymentPresets")}</h3>
+            <p>{t("settings.paymentPresetsIntro")}</p>
+          </div>
+          <IconSparkles size={21} aria-hidden="true" />
+        </header>
+        <div className="resource-list">
+          {PAYMENT_METHOD_PRESETS.map((preset) => (
+            <div className="resource-row" key={preset.key}>
+              <span className="payment-display">
+                <PaymentMethodSymbol symbol={preset.symbol} kind={preset.kind} size={22} />
+                <span>
+                  <strong>{t(preset.labelKey)}</strong>
+                  <small>{t(`settings.kinds.${preset.kind}`)}</small>
+                </span>
+              </span>
+              <Button type="button" variant="ghost" onClick={() => selectPreset(preset)}>
+                {t("settings.usePreset")}
+              </Button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {presetDraft ? <InlineNotice>{t("settings.paymentPresetReady")}</InlineNotice> : null}
       <form
         className="resource-form resource-form--payment"
         onSubmit={submit}
-        key={editing?.id ?? "new"}
+        key={editing?.id ?? presetDraft?.revision ?? `new-${formRevision}`}
       >
         <Field label={t("settings.paymentName")}>
-          <input name="name" maxLength={80} defaultValue={editing?.name ?? ""} required />
+          <input
+            name="name"
+            maxLength={80}
+            defaultValue={editing?.name ?? presetDraft?.name ?? ""}
+            required
+          />
         </Field>
         <Field label={t("settings.paymentKind")}>
           <span className="select-wrap">
-            <select name="kind" defaultValue={editing?.kind ?? "card"}>
+            <select name="kind" defaultValue={editing?.kind ?? presetDraft?.preset.kind ?? "card"}>
               {(["card", "wallet", "bank", "store", "other"] as const).map((kind) => (
                 <option value={kind} key={kind}>
                   {t(`settings.kinds.${kind}`)}
@@ -414,8 +659,9 @@ export function PaymentMethodSettingsPage() {
             placeholder={t("settings.paymentLabelPlaceholder")}
           />
         </Field>
+        <SymbolPicker value={symbol} onChange={setSymbol} {...symbolPicker} />
         <Button type="submit" disabled={mutation.isPending}>
-          {editing ? (
+          {editing || presetDraft ? (
             t("app.save")
           ) : (
             <>
@@ -424,8 +670,8 @@ export function PaymentMethodSettingsPage() {
             </>
           )}
         </Button>
-        {editing ? (
-          <Button variant="ghost" onClick={() => setEditingId(null)}>
+        {editing || presetDraft ? (
+          <Button variant="ghost" onClick={cancelEditing}>
             {t("app.cancel")}
           </Button>
         ) : null}
@@ -435,7 +681,7 @@ export function PaymentMethodSettingsPage() {
           paymentMethods.map((payment) => (
             <div className="resource-row" key={payment.id}>
               <span className="payment-display">
-                <IconCreditCard size={20} />
+                <PaymentMethodSymbol symbol={payment.symbol} kind={payment.kind} size={20} />
                 <span>
                   <strong>{payment.name}</strong>
                   <small>
@@ -446,7 +692,7 @@ export function PaymentMethodSettingsPage() {
                 </span>
               </span>
               <div className="resource-row__actions">
-                <Button variant="ghost" onClick={() => setEditingId(payment.id)}>
+                <Button variant="ghost" onClick={() => startEditing(payment.id)}>
                   {t("app.edit")}
                 </Button>
                 <button

@@ -3,7 +3,6 @@ import {
   IconArchive,
   IconArrowLeft,
   IconCalendarEvent,
-  IconCreditCard,
   IconEdit,
   IconExternalLink,
   IconPlayerPlay,
@@ -14,6 +13,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api } from "../../api/client";
+import { PaymentMethodSymbol } from "../../components/ResourceSymbol";
 import {
   Button,
   CategoryPill,
@@ -165,7 +165,11 @@ export function SubscriptionDetailPage() {
             {t("nav.subscriptions")}
           </Link>
           <div className="detail-header__identity">
-            <ServiceMark name={subscription.name} color={category?.color} />
+            <ServiceMark
+              name={subscription.name}
+              symbol={subscription.symbol}
+              color={category?.color}
+            />
             <div>
               <h1>{subscription.name}</h1>
               <div className="detail-header__badges">
@@ -173,7 +177,13 @@ export function SubscriptionDetailPage() {
                   status={subscription.status}
                   archived={Boolean(subscription.archivedAt)}
                 />
-                {category ? <CategoryPill name={category.name} color={category.color} /> : null}
+                {category ? (
+                  <CategoryPill
+                    name={category.name}
+                    color={category.color}
+                    symbol={category.symbol}
+                  />
+                ) : null}
               </div>
             </div>
           </div>
@@ -237,7 +247,11 @@ export function SubscriptionDetailPage() {
             <dt>{t("detail.category")}</dt>
             <dd>
               {category ? (
-                <CategoryPill name={category.name} color={category.color} />
+                <CategoryPill
+                  name={category.name}
+                  color={category.color}
+                  symbol={category.symbol}
+                />
               ) : (
                 t("subscriptions.noCategory")
               )}
@@ -246,7 +260,11 @@ export function SubscriptionDetailPage() {
           <div>
             <dt>{t("detail.paymentMethod")}</dt>
             <dd className="detail-list__icon-value">
-              <IconCreditCard size={18} />
+              <PaymentMethodSymbol
+                symbol={paymentMethod?.symbol ?? null}
+                kind={paymentMethod?.kind ?? "other"}
+                size={18}
+              />
               {paymentMethod
                 ? [paymentMethod.name, paymentMethod.label].filter(Boolean).join(" ")
                 : t("subscriptions.noPaymentMethod")}

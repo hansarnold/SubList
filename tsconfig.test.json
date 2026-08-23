@@ -19,6 +19,8 @@
     "tests",
     "src/domain",
     "src/shared",
+    "src/web/api/types.ts",
+    "src/web/utils/format.ts",
     "src/worker",
     "src/application",
     "src/infrastructure"

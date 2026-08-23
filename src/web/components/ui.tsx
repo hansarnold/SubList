@@ -15,7 +15,9 @@ import { IconAlertCircle, IconRefresh, IconX } from "@tabler/icons-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { ApiError } from "../api/client";
+import type { ResourceSymbol } from "../../domain/symbol";
 import { serviceMonogram } from "../utils/format";
+import { CategorySymbol, SymbolGlyph } from "./ResourceSymbol";
 
 export function Button({
   variant = "primary",
@@ -47,7 +49,26 @@ export function IconButton({
   );
 }
 
-export function ServiceMark({ name, color }: { name: string; color?: string | null | undefined }) {
+export function ServiceMark({
+  name,
+  color,
+  symbol = null,
+}: {
+  name: string;
+  color?: string | null | undefined;
+  symbol?: ResourceSymbol | undefined;
+}) {
+  if (symbol) {
+    return (
+      <span
+        className="service-mark service-mark--symbol"
+        aria-hidden="true"
+        style={color ? ({ "--service-color": color } as CSSProperties) : undefined}
+      >
+        <SymbolGlyph symbol={symbol} size={28} />
+      </span>
+    );
+  }
   return (
     <span
       className="service-mark"
@@ -59,10 +80,18 @@ export function ServiceMark({ name, color }: { name: string; color?: string | nu
   );
 }
 
-export function CategoryPill({ name, color }: { name: string; color: string }) {
+export function CategoryPill({
+  name,
+  color,
+  symbol = null,
+}: {
+  name: string;
+  color: string;
+  symbol?: ResourceSymbol | undefined;
+}) {
   return (
     <span className="category-pill" style={{ "--category-color": color } as React.CSSProperties}>
-      <span className="category-pill__dot" aria-hidden="true" />
+      <CategorySymbol className="category-pill__symbol" symbol={symbol} color={color} size={16} />
       {name}
     </span>
   );

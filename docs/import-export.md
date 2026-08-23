@@ -356,6 +356,65 @@ If future limits exceed practical batch constraints, imports should move to a re
 - The one-time transformer is an operator cutover tool rather than an application compatibility layer.
 - Database migration versions remain unrelated to archive schema versions.
 
+### 15.1 One-time v1-to-v2 Operator Tool
+
+The repository contains a cutover-only transformer under
+`tools/refactor-migration/`. It is intentionally separate from the Worker and does
+not make archive version 1 a runtime import format.
+
+Run it against a private copy of the pre-refactor archive:
+
+```sh
+pnpm migration:refactor -- \
+  --input /private/path/opensublists-archive-v1.json \
+  --output-dir /private/path/refactor-review
+```
+
+The tool creates three fixed artifacts:
+
+- `opensublists-archive-v2.json`: a schema-version-2 archive with
+  `profile.reportingCurrency` copied from `profile.defaultCurrency`, canonical money
+  strings, and `symbol: null` on every resource unless an explicit map is supplied.
+- `opensublists-refactor-review.csv`: one human-readable row per category, payment
+  method, and subscription, including original currency, amount, recurrence,
+  relationships, and symbol.
+- `opensublists-refactor-verification.json`: source and output SHA-256 hashes, source
+  and output resource counts, exact per-currency micro-unit totals, resolved-reference
+  summaries, lifecycle findings, and symbol coverage.
+
+All content is deterministic for the same input bytes and options and contains no
+source file path. The source hash covers the exact UTF-8 input bytes; the output hash
+covers the exact emitted archive bytes. The tool rejects malformed JSON, unknown
+fields, invalid version-1 records, duplicate IDs or normalized category names,
+broken relationships, inconsistent lifecycle fields, and invalid mapping entries
+before it writes any artifact.
+
+Symbols are opt-in. The tool never guesses them from a resource name. An operator may
+provide a strict mapping file:
+
+```json
+{
+  "format": "opensublists-refactor-symbol-map",
+  "schemaVersion": 1,
+  "symbols": [
+    {
+      "resourceKind": "subscription",
+      "resourceId": "667c6f4c-c010-4d09-8e92-17b8580499aa",
+      "symbol": { "type": "emoji", "value": "✨" }
+    }
+  ]
+}
+```
+
+Apply it with `--symbols /private/path/symbol-map.json`. Every target must exist in
+the source archive, each target may appear once, icons must use the application
+allow-list, and emoji must pass the same single-grapheme rules as the application.
+
+Existing output files cause `OUTPUT_EXISTS`; no file is overwritten by default. Use
+`--overwrite` only for an intentional replacement of the three known artifacts. The
+source archive, mapping file, transformed archive, CSV, verification report, and D1
+backup may all contain private data and must remain outside the repository.
+
 ## 16. Native SubList Adapter
 
 Migration from the native SubList application is an adapter into the current OpenSubLists archive, not a special database writer.

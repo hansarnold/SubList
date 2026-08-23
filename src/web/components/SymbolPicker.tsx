@@ -53,8 +53,17 @@ export function SymbolPicker({
   );
   const [emojiDraft, setEmojiDraft] = useState(value?.type === "emoji" ? value.value : "");
   const [emojiError, setEmojiError] = useState<string | null>(null);
+  const valueKey = value === null ? "null" : `${value.type}:${value.value}`;
+  const [previousValueKey, setPreviousValueKey] = useState(valueKey);
   const iconTabRef = useRef<HTMLButtonElement>(null);
   const emojiTabRef = useRef<HTMLButtonElement>(null);
+
+  if (previousValueKey !== valueKey) {
+    setPreviousValueKey(valueKey);
+    setEmojiDraft(value?.type === "emoji" ? value.value : "");
+    setEmojiError(null);
+    setActiveTab(value?.type === "emoji" ? "emoji" : "icons");
+  }
 
   function activateTab(tab: PickerTab, moveFocus = false) {
     setActiveTab(tab);

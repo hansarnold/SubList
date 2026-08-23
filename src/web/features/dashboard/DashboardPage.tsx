@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  IconAlertTriangle,
   IconCalendarEvent,
   IconChevronRight,
   IconCreditCard,
@@ -7,13 +8,20 @@ import {
   IconPlus,
   IconReceipt,
 } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { api } from "../../api/client";
-import type { Dashboard, UpcomingCharge } from "../../api/types";
+import type {
+  Dashboard,
+  PaymentMethodBreakdown,
+  ReportingEstimate,
+  UpcomingCharge,
+} from "../../api/types";
+import { PaymentMethodSymbol, SymbolGlyph } from "../../components/ResourceSymbol";
 import {
   CategoryPill,
+  InlineNotice,
   LoadingPage,
   PageMessage,
   QueryError,
@@ -49,7 +57,11 @@ function DashboardSummary({
         </div>
         {data.nextCharge ? (
           <Link className="next-charge" to={`/subscriptions/${data.nextCharge.subscriptionId}`}>
-            <ServiceMark name={data.nextCharge.name} color={data.nextCharge.category?.color} />
+            <ServiceMark
+              name={data.nextCharge.name}
+              symbol={data.nextCharge.symbol}
+              color={data.nextCharge.category?.color}
+            />
             <span className="next-charge__details">
               <strong>{data.nextCharge.name}</strong>
               <span className="next-charge__amount">
@@ -136,10 +148,18 @@ function UpcomingAgenda({
                   to={`/subscriptions/${charge.subscriptionId}`}
                   key={`${charge.subscriptionId}-${charge.billingOn}-${index}`}
                 >
-                  <ServiceMark name={charge.name} color={charge.category?.color} />
+                  <ServiceMark
+                    name={charge.name}
+                    symbol={charge.symbol}
+                    color={charge.category?.color}
+                  />
                   <span className="charge-row__name">{charge.name}</span>
                   {charge.category ? (
-                    <CategoryPill name={charge.category.name} color={charge.category.color} />
+                    <CategoryPill
+                      name={charge.category.name}
+                      color={charge.category.color}
+                      symbol={charge.category.symbol}
+                    />
                   ) : null}
                   <span className="charge-row__amount">
                     <strong>{formatMoney(charge.amount, charge.currency, locale)}</strong>
@@ -160,62 +180,134 @@ function UpcomingAgenda({
   );
 }
 
-function Estimates({ data, locale }: { data: Dashboard; locale: string }) {
+function ReportingAmount({ value, locale }: { value: ReportingEstimate | null; locale: string }) {
   const { t } = useTranslation();
-  const [period, setPeriod] = useState<"monthly" | "annual">("monthly");
+  if (value === null) {
+    return <span className="reporting-value--missing">{t("app.notAvailable")}</span>;
+  }
   return (
-    <section className="surface dashboard-estimates">
-      <div className="section-heading-row section-heading-row--stack-mobile">
-        <h2>
-          {period === "monthly"
-            ? t("dashboard.monthlyEstimate")
-            : t("dashboard.annualizedEstimate")}
-        </h2>
-        <div
-          className="segmented-control segmented-control--small"
-          aria-label={t("dashboard.monthlyEstimate")}
-        >
-          <button
-            type="button"
-            className={period === "monthly" ? "is-selected" : ""}
-            onClick={() => setPeriod("monthly")}
-          >
-            {t("dashboard.monthly")}
-          </button>
-          <button
-            type="button"
-            className={period === "annual" ? "is-selected" : ""}
-            onClick={() => setPeriod("annual")}
-          >
-            {t("dashboard.annual")}
-          </button>
-        </div>
+    <>
+      <strong>{formatMoney(value.amount, value.currency, locale)}</strong>
+      <small>{value.currency}</small>
+    </>
+  );
+}
+
+function FxNotice({ data, locale }: { data: Dashboard; locale: string }) {
+  const { t } = useTranslation();
+  const fx = data.reporting.fx;
+  if (fx.state === "not_needed") {
+    return <p className="fx-status fx-status--not-needed">{t("dashboard.fxNotNeeded")}</p>;
+  }
+  if (fx.state === "unavailable") {
+    return (
+      <InlineNotice tone="danger">
+        <IconAlertTriangle size={18} aria-hidden="true" />
+        <span>
+          {t("dashboard.fxUnavailable")}
+          {fx.missingCurrencies.length
+            ? ` ${t("dashboard.fxMissingCurrencies", { currencies: fx.missingCurrencies.join(", ") })}`
+            : ""}
+        </span>
+      </InlineNotice>
+    );
+  }
+  const source = t("dashboard.fxSourceDate", {
+    provider: fx.provider?.toUpperCase() ?? "ECB",
+    date: formatDate(fx.rateDate, locale) ?? fx.rateDate,
+  });
+  return (
+    <InlineNotice tone={fx.state === "fresh" ? "success" : "info"}>
+      {fx.state === "stale" ? <IconAlertTriangle size={18} aria-hidden="true" /> : null}
+      <span>
+        {source} · {t(fx.state === "fresh" ? "dashboard.fxFresh" : "dashboard.fxStale")}
+      </span>
+    </InlineNotice>
+  );
+}
+
+function ReportingEstimates({ data, locale }: { data: Dashboard; locale: string }) {
+  const { t } = useTranslation();
+  const values: Array<{ label: string; value: ReportingEstimate | null }> = [
+    { label: t("dashboard.estimatedMonthlyAverage"), value: data.reporting.monthlyAverage },
+    { label: t("dashboard.estimatedAnnualized"), value: data.reporting.annualized },
+    { label: t("dashboard.estimatedCurrentMonth"), value: data.reporting.currentMonthCharges },
+    { label: t("dashboard.estimatedCurrentYear"), value: data.reporting.currentYearCharges },
+  ];
+  return (
+    <section className="surface reporting-estimates">
+      <div className="section-heading-row">
+        <h2>{t("dashboard.reportingEstimates")}</h2>
+        <span className="reporting-estimates__currency">{data.reporting.currency}</span>
       </div>
-      <div className="estimate-list">
-        {data.totalsByCurrency.map((total) => (
-          <div className="estimate-row" key={total.currency}>
-            <span
-              className={`currency-orb currency-orb--${total.currency.toLowerCase()}`}
-              aria-hidden="true"
-            >
-              {currencySymbol(total.currency, locale)}
-            </span>
-            <span>{total.currency}</span>
-            <strong>
-              {formatMoney(
-                period === "monthly" ? total.monthlyEstimate : total.annualizedEstimate,
-                total.currency,
-                locale,
-              )}
-            </strong>
+      <div className="reporting-estimates__grid">
+        {values.map((item) => (
+          <div className="reporting-estimate" key={item.label}>
+            <span>{item.label}</span>
+            <div className="reporting-estimate__amount">
+              <ReportingAmount value={item.value} locale={locale} />
+            </div>
           </div>
+        ))}
+      </div>
+      <FxNotice data={data} locale={locale} />
+      <p className="surface__footnote">{t("dashboard.estimateDisclaimer")}</p>
+    </section>
+  );
+}
+
+function EstimateRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </div>
+  );
+}
+
+function OriginalCurrencyEstimates({ data, locale }: { data: Dashboard; locale: string }) {
+  const { t } = useTranslation();
+  return (
+    <section className="surface original-estimates">
+      <h2>{t("dashboard.originalCurrencyEstimates")}</h2>
+      <div className="original-estimates__grid">
+        {data.totalsByCurrency.map((total) => (
+          <article className="original-currency-card" key={total.currency}>
+            <header>
+              <span
+                className={`currency-orb currency-orb--${total.currency.toLowerCase()}`}
+                aria-hidden="true"
+              >
+                {currencySymbol(total.currency, locale)}
+              </span>
+              <strong>{total.currency}</strong>
+            </header>
+            <dl>
+              <EstimateRow
+                label={t("dashboard.monthlyEstimate")}
+                value={formatMoney(total.monthlyEstimate, total.currency, locale)}
+              />
+              <EstimateRow
+                label={t("dashboard.annualizedEstimate")}
+                value={formatMoney(total.annualizedEstimate, total.currency, locale)}
+              />
+              <EstimateRow
+                label={t("dashboard.currentMonthEstimate")}
+                value={formatMoney(total.currentMonthCharges, total.currency, locale)}
+              />
+              <EstimateRow
+                label={t("dashboard.currentYearEstimate")}
+                value={formatMoney(total.currentYearCharges, total.currency, locale)}
+              />
+            </dl>
+          </article>
         ))}
       </div>
     </section>
   );
 }
 
-function CategoryBreakdown({ data }: { data: Dashboard }) {
+function CategoryBreakdown({ data, locale }: { data: Dashboard; locale: string }) {
   const { t } = useTranslation();
   const largest = Math.max(...data.categoryBreakdown.map((item) => item.subscriptionCount), 1);
   const total = data.categoryBreakdown.reduce((sum, item) => sum + item.subscriptionCount, 0);
@@ -226,8 +318,22 @@ function CategoryBreakdown({ data }: { data: Dashboard }) {
         {data.categoryBreakdown.map((item) => (
           <div className="category-breakdown__item" key={item.categoryId ?? "uncategorized"}>
             <div>
-              <span>{item.categoryName ?? t("dashboard.uncategorized")}</span>
-              <strong>{item.subscriptionCount}</strong>
+              <span className="breakdown-label">
+                {item.categoryName ? (
+                  <CategoryPill
+                    name={item.categoryName}
+                    color={item.categoryColor ?? "#7c8798"}
+                    symbol={item.categorySymbol}
+                  />
+                ) : (
+                  t("dashboard.uncategorized")
+                )}
+              </span>
+              <span className="breakdown-value">
+                {item.reportingMonthlyAverage === null
+                  ? item.subscriptionCount
+                  : formatMoney(item.reportingMonthlyAverage, data.reporting.currency, locale)}
+              </span>
             </div>
             <progress
               max={largest}
@@ -239,6 +345,37 @@ function CategoryBreakdown({ data }: { data: Dashboard }) {
         ))}
       </div>
       <p className="surface__footnote">{t("dashboard.subscriptions", { count: total })}</p>
+    </section>
+  );
+}
+
+function PaymentBreakdownSymbol({ item }: { item: PaymentMethodBreakdown }) {
+  if (item.paymentMethodSymbol) {
+    return <SymbolGlyph symbol={item.paymentMethodSymbol} size={20} />;
+  }
+  return <PaymentMethodSymbol symbol={null} kind="other" size={20} />;
+}
+
+function PaymentMethodBreakdownView({ data, locale }: { data: Dashboard; locale: string }) {
+  const { t } = useTranslation();
+  return (
+    <section className="surface payment-breakdown">
+      <h2>{t("dashboard.paymentMethodBreakdown")}</h2>
+      <div className="payment-breakdown__items">
+        {data.paymentMethodBreakdown.map((item) => (
+          <div className="payment-breakdown__item" key={item.paymentMethodId ?? "none"}>
+            <span className="breakdown-label">
+              <PaymentBreakdownSymbol item={item} />
+              {item.paymentMethodName ?? t("dashboard.noPaymentMethod")}
+            </span>
+            <span className="breakdown-value">
+              {item.reportingMonthlyAverage === null
+                ? item.subscriptionCount
+                : formatMoney(item.reportingMonthlyAverage, data.reporting.currency, locale)}
+            </span>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -255,7 +392,9 @@ export function DashboardPage() {
   if (query.isError) return <QueryError error={query.error} onRetry={() => void query.refetch()} />;
 
   const data = query.data;
-  const hasSubscriptions = Boolean(data.nextCharge || data.categoryBreakdown.length);
+  const hasSubscriptions = Boolean(
+    data.nextCharge || data.totalsByCurrency.length || data.categoryBreakdown.length,
+  );
 
   return (
     <div className="page page--dashboard">
@@ -290,9 +429,13 @@ export function DashboardPage() {
           <div className="dashboard-grid">
             <UpcomingAgenda data={data} locale={i18n.language} days={days} setDays={setDays} />
             <aside className="dashboard-grid__side">
-              <Estimates data={data} locale={i18n.language} />
-              <CategoryBreakdown data={data} />
+              <ReportingEstimates data={data} locale={i18n.language} />
             </aside>
+          </div>
+          <OriginalCurrencyEstimates data={data} locale={i18n.language} />
+          <div className="breakdown-grid">
+            <CategoryBreakdown data={data} locale={i18n.language} />
+            <PaymentMethodBreakdownView data={data} locale={i18n.language} />
           </div>
         </>
       )}

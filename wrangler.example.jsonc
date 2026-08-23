@@ -17,6 +17,9 @@
       "invocation_logs": true,
     },
   },
+  "triggers": {
+    "crons": [],
+  },
   "vars": {
     "ENVIRONMENT": "local",
     "PUBLIC_ORIGIN": "http://localhost:5173",
@@ -35,6 +38,9 @@
       "name": "open-sublists-preview",
       "workers_dev": false,
       "preview_urls": false,
+      "triggers": {
+        "crons": [],
+      },
       "vars": {
         "ENVIRONMENT": "preview",
         "PUBLIC_ORIGIN": "https://preview.example.com",
@@ -54,6 +60,9 @@
       "name": "open-sublists-production",
       "workers_dev": false,
       "preview_urls": false,
+      "triggers": {
+        "crons": ["15 18 * * *"],
+      },
       "routes": [
         {
           "pattern": "sublist.example.com",

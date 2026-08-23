@@ -4,6 +4,7 @@ import { type FormEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../../api/client";
+import { COMMON_ICON_KEYS, type CommonIconKey, type ResourceSymbol } from "../../../domain/symbol";
 import type {
   Category,
   PaymentMethod,
@@ -12,10 +13,12 @@ import type {
   SubscriptionInput,
 } from "../../api/types";
 import { Button, Field, InlineNotice, LoadingPage, QueryError } from "../../components/ui";
+import { SymbolPicker } from "../../components/SymbolPicker";
 import { formatDate, previewOccurrences } from "../../utils/format";
 
 type FormState = {
   name: string;
+  symbol: ResourceSymbol;
   amount: string;
   currency: string;
   recurrenceCount: string;
@@ -77,6 +80,7 @@ function todayDateOnly() {
 function initialState(): FormState {
   return {
     name: "",
+    symbol: null,
     amount: "",
     currency: "USD",
     recurrenceCount: "1",
@@ -93,6 +97,7 @@ function initialState(): FormState {
 function stateFromSubscription(subscription: Subscription): FormState {
   return {
     name: subscription.name,
+    symbol: subscription.symbol,
     amount: subscription.amount,
     currency: subscription.currency,
     recurrenceCount: String(subscription.recurrence.count),
@@ -120,6 +125,7 @@ function isRealDate(value: string) {
 function toInput(state: FormState): SubscriptionInput {
   return {
     name: state.name.trim(),
+    symbol: state.symbol,
     amount: state.amount,
     currency: state.currency.toUpperCase(),
     recurrence: {
@@ -152,7 +158,7 @@ type SubscriptionFormEditorProps = {
   subscription: Subscription | undefined;
   categories: Category[];
   paymentMethods: PaymentMethod[];
-  defaultCurrency: string;
+  reportingCurrency: string;
   backTo: string;
 };
 
@@ -161,7 +167,7 @@ function SubscriptionFormEditor({
   subscription,
   categories,
   paymentMethods,
-  defaultCurrency,
+  reportingCurrency,
   backTo,
 }: SubscriptionFormEditorProps) {
   const { t, i18n } = useTranslation();
@@ -171,9 +177,31 @@ function SubscriptionFormEditor({
   const [form, setForm] = useState<FormState>(() =>
     subscription
       ? stateFromSubscription(subscription)
-      : { ...initialState(), currency: defaultCurrency },
+      : { ...initialState(), currency: reportingCurrency },
   );
   const [errors, setErrors] = useState<FormErrors>({});
+  const iconLabels = useMemo(
+    () =>
+      Object.fromEntries(COMMON_ICON_KEYS.map((key) => [key, t(`symbols.icons.${key}`)])) as Record<
+        CommonIconKey,
+        string
+      >,
+    [t],
+  );
+  const emojiOptions = useMemo(
+    () =>
+      [
+        ["⭐", "star"],
+        ["🎬", "movie"],
+        ["🎵", "music"],
+        ["☁️", "cloud"],
+        ["💳", "card"],
+        ["🧾", "receipt"],
+        ["✈️", "travel"],
+        ["🛠️", "tools"],
+      ].map(([value, key]) => ({ value: value ?? "", label: t(`symbols.emojis.${key}`) })),
+    [t],
+  );
 
   const mutation = useMutation({
     mutationFn: (input: SubscriptionInput) =>
@@ -297,6 +325,22 @@ function SubscriptionFormEditor({
                 placeholder={t("form.namePlaceholder")}
               />
             </Field>
+            <SymbolPicker
+              value={form.symbol}
+              onChange={(symbol) => update("symbol", symbol)}
+              iconLabels={iconLabels}
+              emojiOptions={emojiOptions}
+              labels={{
+                legend: t("symbols.legend"),
+                commonIcons: t("symbols.commonIcons"),
+                emoji: t("symbols.emoji"),
+                emojiInput: t("symbols.emojiInput"),
+                emojiInputPlaceholder: t("symbols.emojiInputPlaceholder"),
+                invalidEmoji: t("symbols.invalidEmoji"),
+                clear: t("symbols.clear"),
+              }}
+              disabled={mutation.isPending}
+            />
             <div className="field-row field-row--money">
               <Field id={formFieldIds.amount} label={t("form.amount")} error={errors.amount}>
                 <input
@@ -542,7 +586,7 @@ export function SubscriptionFormPage() {
       subscription={subscriptionQuery.data}
       categories={categoriesQuery.data ?? []}
       paymentMethods={paymentMethodsQuery.data ?? []}
-      defaultCurrency={meQuery.data?.defaultCurrency ?? "USD"}
+      reportingCurrency={meQuery.data?.reportingCurrency ?? "USD"}
       backTo={backTo}
     />
   );

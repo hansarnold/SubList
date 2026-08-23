@@ -26,6 +26,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
 import type { Category, Dashboard, PaymentMethod, Subscription } from "../../api/types";
+import { PaymentMethodSymbol } from "../../components/ResourceSymbol";
 import {
   Button,
   CategoryPill,
@@ -101,7 +102,11 @@ function SubscriptionCard({
       style={{ "--card-accent": category?.color ?? "#8b95a5" } as React.CSSProperties}
     >
       <div className="subscription-card__head">
-        <ServiceMark name={subscription.name} color={category?.color} />
+        <ServiceMark
+          name={subscription.name}
+          symbol={subscription.symbol}
+          color={category?.color}
+        />
         <div className="subscription-card__identity">
           <div className="subscription-card__name-row">
             <h2>
@@ -127,7 +132,9 @@ function SubscriptionCard({
           </div>
           <p>{recurrenceLabel(subscription, t)}</p>
           <div className="subscription-card__badges">
-            {category ? <CategoryPill name={category.name} color={category.color} /> : null}
+            {category ? (
+              <CategoryPill name={category.name} color={category.color} symbol={category.symbol} />
+            ) : null}
             {subscription.status !== "active" || subscription.archivedAt ? (
               <StatusBadge
                 status={subscription.status}
@@ -142,7 +149,11 @@ function SubscriptionCard({
         <span>{subscription.currency}</span>
       </div>
       <div className="subscription-card__payment">
-        <IconCreditCard size={17} aria-hidden="true" />
+        <PaymentMethodSymbol
+          symbol={paymentMethod?.symbol ?? null}
+          kind={paymentMethod?.kind ?? "other"}
+          size={17}
+        />
         <span>
           {paymentMethod
             ? [paymentMethod.name, paymentMethod.label].filter(Boolean).join(" ")
@@ -203,7 +214,11 @@ function SubscriptionTable({
                     className="subscription-table__service"
                     to={`/subscriptions/${subscription.id}`}
                   >
-                    <ServiceMark name={subscription.name} color={category?.color} />
+                    <ServiceMark
+                      name={subscription.name}
+                      symbol={subscription.symbol}
+                      color={category?.color}
+                    />
                     <span>
                       <strong>{subscription.name}</strong>
                       <small>{recurrenceLabel(subscription, t)}</small>
@@ -218,9 +233,26 @@ function SubscriptionTable({
                     t("subscriptions.noUpcomingCharge")}
                 </td>
                 <td>
-                  {category ? <CategoryPill name={category.name} color={category.color} /> : "—"}
+                  {category ? (
+                    <CategoryPill
+                      name={category.name}
+                      color={category.color}
+                      symbol={category.symbol}
+                    />
+                  ) : (
+                    "—"
+                  )}
                 </td>
-                <td>{payment ? [payment.name, payment.label].filter(Boolean).join(" ") : "—"}</td>
+                <td>
+                  {payment ? (
+                    <span className="subscription-table__payment">
+                      <PaymentMethodSymbol symbol={payment.symbol} kind={payment.kind} size={18} />
+                      {[payment.name, payment.label].filter(Boolean).join(" ")}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>
                   <StatusBadge
                     status={subscription.status}

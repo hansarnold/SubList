@@ -394,11 +394,15 @@ database so the old production database remains an immediate rollback source.
 1. Announce a short write freeze and record the currently deployed Worker version.
 2. Export the current user archive and a D1 SQL backup.
 3. Record file hashes, table counts, resource IDs, and per-currency subscription sums.
-4. Transform the snapshot locally into the target schema.
-5. Set `reporting_currency` from the current default currency.
-6. Suggest category, payment-method, and subscription symbols from normalized names;
-   place unmatched or ambiguous rows into a review table.
-7. Let the maintainer approve or edit that table before import.
+4. Run the repository's deterministic v1-to-v2 transformer against the private
+   archive. It sets `reportingCurrency` from `defaultCurrency`, canonicalizes amount
+   strings without changing micro-unit values, and writes `symbol: null` by default.
+5. Review the generated CSV and machine verification report against the recorded
+   source counts, IDs, exact per-currency micro-unit sums, relationships, and lifecycle
+   states.
+6. If symbols are wanted for cutover, create an explicit private mapping file and run
+   the transformer again. Do not infer a symbol from a normalized name.
+7. Approve the final transformed archive and its recorded output hash before import.
 8. Create a fresh production D1 database and apply the new baseline schema.
 9. Import the transformed data and validate IDs, relationships, counts, original
    amounts, currencies, and recurrence fields.
@@ -410,6 +414,11 @@ database so the old production database remains an immediate rollback source.
 
 The product does not retain an old archive importer solely for this cutover. A
 one-purpose local transformation script and its review artifact are sufficient.
+
+The operator command and artifact contracts are specified in
+`docs/import-export.md#151-one-time-v1-to-v2-operator-tool`. Output files are fixed and
+refuse to overwrite by default. No real archive, symbol map, review CSV, verification
+report, or database backup belongs in version control.
 
 ## 10. Implementation Sequence
 
@@ -438,7 +447,8 @@ one-purpose local transformation script and its review artifact are sufficient.
 
 ### Phase D: Cutover and Deployment
 
-- Build the one-time export transformer and human-review table.
+- Run the one-time archive transformer and inspect its human-review CSV and
+  machine-verification report.
 - Exercise the full cutover against a temporary local and remote D1 database.
 - Freeze production writes, repeat the verified process, switch the binding, and smoke
   test.

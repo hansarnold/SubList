@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { IconMapOff } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { ApiError } from "../api/client";
-import { PageMessage } from "../components/ui";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { ApiError, api } from "../api/client";
+import { LoadingPage, PageMessage, QueryError } from "../components/ui";
 import { DashboardPage } from "../features/dashboard/DashboardPage";
+import { WelcomePage } from "../features/onboarding/WelcomePage";
 import {
   CategorySettingsPage,
   DataSettingsPage,
@@ -44,25 +45,45 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="subscriptions" element={<SubscriptionsPage />} />
-            <Route path="subscriptions/new" element={<SubscriptionFormPage />} />
-            <Route path="subscriptions/:subscriptionId" element={<SubscriptionDetailPage />} />
-            <Route path="subscriptions/:subscriptionId/edit" element={<SubscriptionFormPage />} />
-            <Route path="settings" element={<SettingsLayout />}>
-              <Route index element={<Navigate to="profile" replace />} />
-              <Route path="profile" element={<ProfileSettingsPage />} />
-              <Route path="categories" element={<CategorySettingsPage />} />
-              <Route path="payment-methods" element={<PaymentMethodSettingsPage />} />
-              <Route path="data" element={<DataSettingsPage />} />
-            </Route>
-            <Route path="*" element={<NotFoundPage />} />
-          </Route>
-        </Routes>
+        <OnboardingGate />
       </BrowserRouter>
     </QueryClientProvider>
+  );
+}
+
+function OnboardingGate() {
+  const location = useLocation();
+  const sessionQuery = useQuery({ queryKey: ["session"], queryFn: api.session });
+
+  if (sessionQuery.isPending) return <LoadingPage variant="form" />;
+  if (sessionQuery.isError) {
+    return <QueryError error={sessionQuery.error} onRetry={() => void sessionQuery.refetch()} />;
+  }
+
+  const onWelcomeRoute = location.pathname.replace(/\/+$/, "") === "/welcome";
+  const onboardingComplete = sessionQuery.data.user.onboardingCompletedAt !== null;
+  if (!onboardingComplete && !onWelcomeRoute) return <Navigate to="/welcome" replace />;
+  if (onboardingComplete && onWelcomeRoute) return <Navigate to="/dashboard" replace />;
+
+  return (
+    <Routes>
+      <Route path="welcome" element={<WelcomePage />} />
+      <Route element={<AppShell />}>
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="subscriptions" element={<SubscriptionsPage />} />
+        <Route path="subscriptions/new" element={<SubscriptionFormPage />} />
+        <Route path="subscriptions/:subscriptionId" element={<SubscriptionDetailPage />} />
+        <Route path="subscriptions/:subscriptionId/edit" element={<SubscriptionFormPage />} />
+        <Route path="settings" element={<SettingsLayout />}>
+          <Route index element={<Navigate to="profile" replace />} />
+          <Route path="profile" element={<ProfileSettingsPage />} />
+          <Route path="categories" element={<CategorySettingsPage />} />
+          <Route path="payment-methods" element={<PaymentMethodSettingsPage />} />
+          <Route path="data" element={<DataSettingsPage />} />
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
+    </Routes>
   );
 }
