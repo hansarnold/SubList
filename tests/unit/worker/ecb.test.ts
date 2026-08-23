@@ -99,6 +99,28 @@ describe("ECB CSV adapter", () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
+  it("calls the default global fetch with the Workers-compatible receiver", async () => {
+    const globalFetcher = vi.fn(function () {
+      return Promise.resolve(
+        new Response(validCsv(), {
+          status: 200,
+          headers: { "Content-Type": "text/csv" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", globalFetcher);
+
+    try {
+      await expect(new EcbExchangeRateProvider().fetchLatest()).resolves.toMatchObject({
+        provider: "ecb",
+        rateDate: "2026-08-21",
+      });
+      expect(globalFetcher.mock.contexts[0]).toBe(globalThis);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects HTTP failures and declared oversized responses", async () => {
     const failed = new EcbExchangeRateProvider(() =>
       Promise.resolve(new Response("no", { status: 503 })),

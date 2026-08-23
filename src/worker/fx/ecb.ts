@@ -40,7 +40,7 @@ export class EcbProviderError extends Error {
 
 export class EcbExchangeRateProvider implements ExchangeRateProvider {
   constructor(
-    private readonly fetcher: Fetcher = fetch,
+    private readonly fetcher: Fetcher = (input, init) => globalThis.fetch(input, init),
     private readonly timeoutMs = DEFAULT_TIMEOUT_MS,
     private readonly maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
   ) {}
