@@ -189,7 +189,7 @@ Billing dates are local calendar dates. The next occurrence is inclusive of loca
 
 ## 10. Pages and User Flows
 
-The MVP includes Dashboard, Subscriptions, and Settings. It uses desktop sidebar navigation and mobile bottom navigation. Create and edit forms prioritize name, amount, frequency, and billing anchor while placing end-of-month behavior and notes behind progressive disclosure.
+The MVP includes Dashboard, Subscriptions, and Settings. It uses desktop sidebar navigation and mobile bottom navigation. The visible English label for the Dashboard route is Overview. Its desktop view prioritizes the next charge and a grouped 30-day renewal agenda, followed by separate per-currency estimates and a count-based category summary. The desktop Subscriptions route uses a responsive card grid by default with an optional compact list view, plus search, sorting, and tenant-scoped filters. Create and edit forms prioritize name, amount, frequency, and billing anchor while placing end-of-month behavior and notes behind progressive disclosure.
 
 Responsive behavior, lifecycle actions, accessibility, localization, empty states, and acceptance flows are defined in [MVP UI Flow](./ui-flow.md).
 
@@ -220,6 +220,7 @@ Module boundaries and tool choices are defined in [Architecture and Technology D
 - [x] Define the Access, session, caching, and tenant-isolation model.
 - [x] Finalize the migration-ready data model and DDL proposal.
 - [x] Define API, UI, import/export, environment, and deployment contracts.
+- [x] Select consistent desktop visual targets for Dashboard and Subscriptions.
 
 Completion criterion: No blocking ambiguity remains in the data model or critical business rules.
 
@@ -299,6 +300,7 @@ The following do not block the initial project scaffold:
 - Cloudflare Access OTP is the preferred identity solution.
 - TypeScript is the application language; D1 schema and queries use explicit SQL.
 - The MVP uses React, Vite, Hono, Zod, Vitest, Wrangler, and pnpm without an ORM.
+- The initial scaffold targets Node.js 24 LTS; exact dependency and package-manager versions are pinned in repository metadata.
 - The Access global session duration is 30 days, and the application or policy session duration is 7 days.
 - The Worker caches remote Access JWKS data but verifies every JWT locally on every request.
 - Authorization decisions and authenticated API responses are not shared-cacheable; authenticated APIs default to `Cache-Control: private, no-store`.
@@ -309,6 +311,7 @@ The following do not block the initial project scaffold:
 - Subscription lifecycle state is active or cancelled; archiving is independent and is the default removal action.
 - Pause periods and price history are deferred to dedicated tables.
 - The API base path is `/api/v1`.
+- The Dashboard API returns projected occurrence records, not subscription rows, so short recurrence intervals are counted correctly.
 - Initial UI locales are English and Simplified Chinese.
 - Date rules and tenant isolation require automated tests before substantial UI development.
 

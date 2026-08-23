@@ -47,7 +47,7 @@ TypeScript is the single application language so frontend previews, API schemas,
 - Cloudflare Workers module syntax.
 - Vite with the Cloudflare Vite plugin.
 - Wrangler for local development, generated runtime types, migrations, and deployment.
-- The active Node.js LTS release is pinned when the repository is scaffolded.
+- Node.js 24 LTS is selected for the initial scaffold and is pinned in repository metadata when the project is created.
 - pnpm is the package manager, with a committed lockfile.
 
 Exact package versions are pinned in `package.json`; planning documents do not duplicate version numbers that will become stale.
@@ -248,6 +248,8 @@ Revisit these decisions only with concrete evidence:
 
 ## 13. Official References
 
+- [Node.js release status](https://nodejs.org/en/about/previous-releases)
+- [Install and update Wrangler](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
 - [Cloudflare Workers languages](https://developers.cloudflare.com/workers/languages/)
 - [TypeScript on Workers](https://developers.cloudflare.com/workers/languages/typescript/)
 - [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)

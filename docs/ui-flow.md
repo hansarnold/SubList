@@ -40,14 +40,14 @@ Application behavior:
     └── data
 ```
 
-`/` redirects to the dashboard after authentication.
+`/` redirects to `/dashboard` after authentication. The route and feature remain named Dashboard in code and documentation, while the visible English navigation label and page heading are `Overview`. The label uses a localization key rather than a route-derived string.
 
 ## 4. Responsive Navigation
 
 ### Desktop
 
 - Persistent left sidebar.
-- Primary items: Dashboard, Subscriptions, Settings.
+- Primary items: Overview, Subscriptions, Settings.
 - Global Add Subscription button remains visible.
 - Content uses a centered maximum width while lists may expand wider.
 
@@ -80,6 +80,8 @@ The user may skip display-name entry. The application does not block first use o
 4. Category breakdown.
 5. Recent or newly added subscriptions when useful.
 
+At desktop widths, the upcoming-charge agenda is the dominant content area. Summary information supports the agenda rather than competing with it as a dense analytics dashboard.
+
 ## 6.2 Multiple Currencies
 
 Each currency receives a separate summary row or card:
@@ -92,6 +94,8 @@ JPY  ¥1,200 monthly estimate
 
 The UI must not show one grand total until exchange-rate conversion is implemented and clearly labeled.
 
+Monthly estimates are the default desktop presentation. Annualized estimates remain available through a compact Monthly/Annual control or equivalent disclosure without changing the currency-separation rule.
+
 ## 6.3 Upcoming Charges
 
 - Default window: 30 days.
@@ -99,6 +103,8 @@ The UI must not show one grand total until exchange-rate conversion is implement
 - Group entries by billing date.
 - Show name, amount, currency, category color, and billing date.
 - Selecting an entry opens subscription detail.
+- The next-charge summary is calculated independently of the selected upcoming window, so it can show the next active charge even when it falls outside a 7-day view.
+- Every occurrence inside the selected window is represented. A daily or weekly subscription may therefore appear more than once.
 
 ## 6.4 Empty Dashboard
 
@@ -130,7 +136,7 @@ Filters are represented in URL search parameters and survive refresh. A Clear Fi
 
 ## 7.3 Desktop Presentation
 
-Use a compact table or wide list with:
+Use a responsive card grid by default at comfortable desktop widths. Provide an optional compact list view for users who prefer higher density. Both views include:
 
 - Service.
 - Amount and interval.
@@ -139,6 +145,8 @@ Use a compact table or wide list with:
 - Payment method.
 - Status.
 - Row action menu.
+
+The selected view is stored as a local display preference. Search, sorting, and resource filters remain URL-driven and behave identically in both views.
 
 ## 7.4 Mobile Presentation
 
@@ -357,6 +365,36 @@ Use the same not-found presentation for absent resources and resources owned by 
 - Monetary totals use tabular numerals.
 - Avoid decorative charts when a compact list communicates the same information more clearly.
 - No custom background images or uploaded icons in the MVP.
+
+### 16.1 Selected Dashboard Prototype
+
+![Selected OpenSubLists dashboard web prototype](./assets/open-sublists-dashboard-prototype-web.png)
+
+This image is the selected visual reference for the authenticated desktop-width `/dashboard` route. It establishes:
+
+- The same browser-native application shell, persistent navigation, typography, spacing, surface treatment, and Add Subscription action used by the selected Subscriptions prototype.
+- `Overview` as the visible localized English label for the Dashboard route.
+- A next-charge summary and a separate 30-day amount for each currency, with no combined cross-currency total.
+- A 30-day renewal agenda as the dominant content area, with a secondary 7-day view.
+- Separate monthly estimates by currency and a restrained category breakdown based on active subscription counts.
+- A compact first viewport that favors lists and direct values over decorative charts.
+
+The image is directional rather than normative. Its product names, icons, amounts, dates, categories, and currency examples are mock content. The implementation must also expose annualized estimates through compact progressive disclosure, generate every recurrence occurrence inside the selected window, preserve the route and API rules in this document, and use system or monogram icons unless a separate MVP asset decision is approved. The image does not authorize uploaded service artwork.
+
+### 16.2 Selected Subscriptions Prototype
+
+![Selected OpenSubLists subscriptions web prototype](./assets/open-sublists-subscriptions-prototype-web.png)
+
+This image is the selected visual reference for the authenticated desktop-width `/subscriptions` route. It establishes:
+
+- A browser-native application shell with persistent navigation and one prominent Add Subscription action.
+- Search, next-billing sorting, and grid/list display controls in the page header.
+- Separate monthly estimates for each currency with no combined cross-currency total.
+- Status, category, payment-method, and currency filters above the result set.
+- A responsive subscription-card grid that exposes amount, currency, recurrence, category, payment method, next billing date, and lifecycle state without opening the record.
+- A visibly distinct cancelled state that remains in the normal unarchived collection when the active filters include it.
+
+The image is directional rather than normative. Product names, logos, amounts, dates, payment labels, filter selections, and pagination values are mock content. The route behavior, default filters, tenant isolation, localization, accessibility requirements, money rules, lifecycle semantics, and responsive behavior in this document remain authoritative. The implementation uses system or monogram icons unless a separate MVP asset decision is approved; the image does not authorize uploaded service artwork.
 
 ## 17. Analytics and Privacy
 

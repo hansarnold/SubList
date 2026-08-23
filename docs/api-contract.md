@@ -396,19 +396,35 @@ Optional query parameter:
 Response shape:
 
 ```ts
+type UpcomingCharge = {
+  subscriptionId: string;
+  name: string;
+  amount: string;
+  currency: string;
+  billingOn: string;
+  category: {
+    id: string;
+    name: string;
+    color: string;
+  } | null;
+};
+
 type Dashboard = {
   localToday: string;
   upcomingThrough: string;
+  nextCharge: UpcomingCharge | null;
   totalsByCurrency: Array<{
     currency: string;
     monthlyEstimate: string;
     annualizedEstimate: string;
     upcomingAmount: string;
   }>;
-  upcoming: Subscription[];
+  upcoming: UpcomingCharge[];
   categoryBreakdown: Array<{
     categoryId: string | null;
     categoryName: string | null;
+    categoryColor: string | null;
+    subscriptionCount: number;
     totalsByCurrency: Array<{
       currency: string;
       monthlyEstimate: string;
@@ -417,6 +433,8 @@ type Dashboard = {
   }>;
 };
 ```
+
+`nextCharge` is the earliest active, unarchived occurrence on or after `localToday` and is independent of `upcomingDays`. `upcoming` contains every occurrence in the inclusive window from `localToday` through `upcomingThrough`; a subscription may appear multiple times when its recurrence repeats inside the window. Category counts and estimates include all active, unarchived subscriptions, not only subscriptions with an occurrence inside the selected window.
 
 Different currencies remain separate. Estimates are rounded only at the response boundary.
 
@@ -494,3 +512,6 @@ Required integration tests cover:
 - Same-origin protection on unsafe methods.
 - Error envelope consistency.
 - Dashboard currency separation.
+- Dashboard occurrence expansion for daily and weekly subscriptions.
+- Dashboard next-charge behavior when the occurrence is outside the requested upcoming window.
+- Dashboard category counts excluding cancelled and archived subscriptions.

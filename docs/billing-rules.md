@@ -266,6 +266,8 @@ Additional property tests should verify:
 
 - Returned occurrences are never before local today.
 - Returned occurrences belong to the defined sequence.
+- Projecting an inclusive date window returns every occurrence in order and none after the window end.
+- A short-interval subscription can contribute multiple upcoming charges and the currency total includes each occurrence exactly once.
 - Increasing local today never returns an earlier occurrence.
 - Monthly calculations never drift from the original anchor.
 - Yearly February 29 calculations return to February 29 in leap years.

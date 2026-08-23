@@ -428,7 +428,9 @@ WHERE user_id = ?
 ORDER BY next_billing_on, name;
 ```
 
-### 8.2 Upcoming Active Charges
+### 8.2 Upcoming Expansion Candidates
+
+After active subscriptions have been reconciled to the user's local today, select the subscriptions whose next occurrence could fall inside the requested window:
 
 ```sql
 SELECT *
@@ -436,11 +438,51 @@ FROM subscriptions
 WHERE user_id = ?
   AND status = 'active'
   AND archived_at IS NULL
-  AND next_billing_on BETWEEN ? AND ?
+  AND next_billing_on <= ?
 ORDER BY next_billing_on, name;
 ```
 
-### 8.3 Safe Resource Lookup
+The application layer expands each candidate with the billing domain rules and emits every occurrence through the inclusive window end. The database row is not itself an upcoming-charge record; daily and weekly subscriptions may produce multiple occurrences.
+
+### 8.3 Next Active Charge
+
+After read reconciliation, the earliest active and unarchived row supplies the starting schedule for the next-charge projection:
+
+```sql
+SELECT *
+FROM subscriptions
+WHERE user_id = ?
+  AND status = 'active'
+  AND archived_at IS NULL
+  AND next_billing_on IS NOT NULL
+ORDER BY next_billing_on, name
+LIMIT 1;
+```
+
+The application maps the row to an occurrence response. This lookup is independent of the Dashboard upcoming-window filter.
+
+### 8.4 Category Counts
+
+The Dashboard count breakdown includes all active, unarchived subscriptions and retains the uncategorized group:
+
+```sql
+SELECT
+  s.category_id,
+  c.name AS category_name,
+  c.color AS category_color,
+  COUNT(*) AS subscription_count
+FROM subscriptions AS s
+LEFT JOIN categories AS c
+  ON c.user_id = s.user_id
+ AND c.id = s.category_id
+WHERE s.user_id = ?
+  AND s.status = 'active'
+  AND s.archived_at IS NULL
+GROUP BY s.category_id, c.name, c.color
+ORDER BY subscription_count DESC, category_name;
+```
+
+### 8.5 Safe Resource Lookup
 
 ```sql
 SELECT *

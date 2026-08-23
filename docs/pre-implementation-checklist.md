@@ -1,6 +1,6 @@
 # OpenSubLists Pre-implementation Checklist
 
-> Status: Complete for MVP scaffolding  
+> Status: Ready for MVP scaffolding
 > Last updated: 2026-08-23
 
 This checklist records the planning evidence required before application code is created.
@@ -22,6 +22,7 @@ Evidence: [Product and Technical Plan](./plan.md)
 - [x] TypeScript selected for Worker, domain, and frontend code.
 - [x] SQL selected for D1 schema, migrations, and queries.
 - [x] React, Vite, Hono, Zod, Vitest, Wrangler, and pnpm selected.
+- [x] Node.js 24 LTS selected for the initial scaffold.
 - [x] Explicit SQL selected instead of an ORM.
 - [x] Module boundaries and dependency direction defined.
 
@@ -64,6 +65,7 @@ Evidence: [Data Model](./data-model.md)
 - [x] Materialized next-date reconciliation defined.
 - [x] Exact annualized and monthly formulas defined.
 - [x] Multi-currency separation defined.
+- [x] Upcoming totals and lists expand every recurrence occurrence inside the requested window.
 - [x] Required example and property-test matrix defined.
 
 Evidence: [Billing Rules](./billing-rules.md)
@@ -75,6 +77,7 @@ Evidence: [Billing Rules](./billing-rules.md)
 - [x] Request and response conventions defined.
 - [x] Resource schemas defined.
 - [x] CRUD and lifecycle endpoints defined.
+- [x] Dashboard next-charge, occurrence-list, and category-count responses defined.
 - [x] Error envelope and status codes defined.
 - [x] Request limits defined.
 - [x] Cache, origin, and logging rules defined.
@@ -101,6 +104,7 @@ Evidence: [Import and Export](./import-export.md)
 - [x] Route and navigation map defined.
 - [x] First-run experience defined.
 - [x] Dashboard and list information order defined.
+- [x] Desktop visual references selected for Dashboard and Subscriptions.
 - [x] Create, edit, detail, and lifecycle interactions defined.
 - [x] Settings and import flows defined.
 - [x] Mobile and desktop behavior defined.
@@ -124,7 +128,25 @@ Evidence: [MVP UI Flow](./ui-flow.md)
 
 Evidence: [Environments and Deployment](./environments-and-deployment.md)
 
-## 10. Inputs Required During Implementation
+## 10. Local Scaffolding Start Gate
+
+Planning and local runtime preparation no longer block application code:
+
+- [x] Switch the workstation from Node.js 23.11.0, which is end-of-life, to Node.js 24 LTS.
+
+The following are part of the scaffold itself rather than prerequisites that require another planning round:
+
+- [ ] Pin Node.js in repository metadata and pin pnpm through the `packageManager` field.
+- [ ] Create `package.json`, the pnpm lockfile, and the formatting, linting, type-checking, and test scripts.
+- [ ] Install Wrangler locally as a development dependency; a global Wrangler installation is neither required nor preferred.
+- [ ] Create `wrangler.jsonc` with local-safe values and preview/production placeholders.
+- [ ] Generate the Worker `Env` type from the Wrangler configuration.
+- [ ] Create `migrations/0001_initial.sql` from the approved D1 DDL.
+- [ ] Add the initial CI workflow for install, format, lint, type-check, test, and build.
+
+Cloudflare account IDs, D1 database IDs, Access audience values, and production hostnames are not required for local scaffolding. They become required before the first preview deployment.
+
+## 11. Inputs Required During Implementation
 
 These inputs do not block project scaffolding:
 
@@ -133,7 +155,6 @@ These inputs do not block project scaffolding:
 - Obtain a redacted native SubList export before implementing its adapter.
 - Supply real Access and D1 identifiers only through deployment configuration.
 
-## 11. Next Authorized Engineering Step
+## 12. Next Authorized Engineering Step
 
 The next implementation step is to scaffold the TypeScript Worker and React project, create `migrations/0001_initial.sql` from the approved data model, and implement the pure billing and money modules test-first.
-
