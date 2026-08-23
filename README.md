@@ -45,37 +45,43 @@ Local requests use the fixed identity `developer@localhost.invalid`. Arbitrary u
 | `pnpm deploy:preview`    | Build and deploy with the preview Cloudflare environment    |
 | `pnpm deploy:production` | Build and deploy with the production Cloudflare environment |
 
-## Cloudflare Deployment
+## Self-hosting on Cloudflare
 
-The maintainer deployment is live at
-[sublist.hansarnold.uk](https://sublist.hansarnold.uk/). It uses the
-`open-sublists-production` Worker, an isolated production D1 database, and a
-hostname-scoped Cloudflare Access application.
-
-Cloudflare Access uses one-time email PINs, so OpenSubLists does not store passwords.
-Approved emails are managed in the Access policy and are never committed to this
-repository.
-
-After Wrangler is authenticated, the initial production release is:
+The repository tracks `wrangler.example.jsonc`, which contains only documentation
+values such as `sublist.example.com` and zero UUIDs. Copy it before configuring a
+hosted environment:
 
 ```sh
+cp wrangler.example.jsonc wrangler.local.jsonc
+```
+
+`wrangler.local.jsonc` is ignored by Git. Replace its production hostname, Worker
+name, D1 database name and ID, Access team domain, and Access application audience
+with resources from your own Cloudflare account.
+
+Cloudflare Access uses one-time email PINs, so OpenSubLists does not store passwords.
+Approved emails remain in the Access policy and must not be committed. Production
+also disables both `workers.dev` and version preview URLs to avoid an unprotected
+alternate entry point.
+
+After provisioning D1 and Access, validate and release with:
+
+```sh
+pnpm deploy:dry-run:production
 pnpm db:migrate:production
 pnpm deploy:production
 ```
 
-Production disables both `workers.dev` and version preview URLs to prevent an
-unprotected alternate entry point. The committed database ID, Access audience, and
-team domain are deployment metadata rather than credentials; forks should replace
-them with their own resources. API tokens, JWTs, and approved email addresses must
-never be committed.
-
-The preview environment remains a fail-closed template until separate preview D1,
-hostname, and Access resources are provisioned.
-
-See [Environments and Deployment](./docs/environments-and-deployment.md) for the complete release and recovery procedure.
+See [Self-hosting](./docs/self-hosting.md) for first-time setup and
+[Environments and Deployment](./docs/environments-and-deployment.md) for ongoing
+release and recovery procedures.
 
 ## Architecture and Product Decisions
 
 The implementation intentionally remains one Worker plus one D1 database per environment. Business rules are runtime-independent TypeScript, and every data operation is scoped to the verified current user.
 
 Start with the [documentation index](./docs/README.md) for the product scope, billing rules, data model, API contract, UI flow, and security decisions.
+
+## License
+
+OpenSubLists is available under the [MIT License](./LICENSE).

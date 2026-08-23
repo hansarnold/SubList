@@ -1,9 +1,9 @@
 # OpenSubLists Data Model
 
-> Status: MVP specification  
+> Status: Implemented baseline with approved refactor target
 > Last updated: 2026-08-23  
 > Target database: Cloudflare D1  
-> Purpose: Define a migration-ready relational model before implementation
+> Purpose: Define the target relational model for implementation and maintainer cutover
 
 ## 1. Scope
 
@@ -12,10 +12,12 @@ This document defines the MVP persistence model for:
 - Cloudflare Access identities and application users.
 - Categories and payment methods.
 - Recurring subscriptions.
+- Common-icon and emoji symbols on user-facing resources.
+- Deployment-shared daily FX snapshots and exact rates.
 - Tenant isolation and relationship integrity.
 - Materialized next-billing dates.
 
-The MVP does not persist charge transactions, pause periods, price history, exchange rates, reminder deliveries, or import history. Those features have migration paths described later in this document.
+The target does not persist charge transactions, payment state, pause periods, price history, historical transaction valuation, reminder deliveries, or import history. It persists only the latest available provider snapshots needed for current estimates.
 
 ## 2. Core Decisions
 
@@ -86,6 +88,12 @@ The default destructive-looking action in the UI is Archive. Permanent deletion 
 
 Clients never choose `next_billing_on` directly. The server calculates it whenever schedule inputs change and reconciles stale values during reads or scheduled work.
 
+### 2.8 Symbols and FX Reference Data Are Explicit
+
+Categories, payment methods, and subscriptions store a nullable symbol pair. `icon` values are validated application tokens and `emoji` values are one validated Unicode grapheme; arbitrary markup and image locations are not persistence concepts.
+
+FX snapshots are shared reference data for the deployment rather than tenant-owned business records. They contain provider facts only and never overwrite a subscription's original amount or currency.
+
 ## 3. Relationship Overview
 
 ```text
@@ -96,9 +104,12 @@ users
   └──< subscriptions
           ├── category_id --------> categories.id    (same user)
           └── payment_method_id --> payment_methods.id (same user)
+
+fx_snapshot
+  └──< fx_rates
 ```
 
-All tenant-owned primary and foreign keys include `user_id`.
+All tenant-owned primary and foreign keys include `user_id`. FX rows have no `user_id` because one validated snapshot serves every tenant in the deployment.
 
 ## 4. Table Definitions
 
@@ -106,16 +117,16 @@ All tenant-owned primary and foreign keys include `user_id`.
 
 Stores the stable application account and user preferences.
 
-| Column           | Type    | Null | Description                              |
-| ---------------- | ------- | ---- | ---------------------------------------- |
-| id               | TEXT    | No   | UUID primary key                         |
-| primary_email    | TEXT    | No   | Last verified display email              |
-| email_normalized | TEXT    | No   | Trimmed, lowercased identity key; unique |
-| display_name     | TEXT    | Yes  | Optional display name                    |
-| timezone         | TEXT    | No   | IANA time zone, default `UTC`            |
-| default_currency | TEXT    | No   | Uppercase ISO 4217 code, default `USD`   |
-| created_at       | INTEGER | No   | Unix epoch milliseconds                  |
-| updated_at       | INTEGER | No   | Unix epoch milliseconds                  |
+| Column             | Type    | Null | Description                                            |
+| ------------------ | ------- | ---- | ------------------------------------------------------ |
+| id                 | TEXT    | No   | UUID primary key                                       |
+| primary_email      | TEXT    | No   | Last verified display email                            |
+| email_normalized   | TEXT    | No   | Trimmed, lowercased identity key; unique               |
+| display_name       | TEXT    | Yes  | Optional display name                                  |
+| timezone           | TEXT    | No   | IANA time zone, default `UTC`                          |
+| reporting_currency | TEXT    | No   | Currency for combined estimates and new-record default |
+| created_at         | INTEGER | No   | Unix epoch milliseconds                                |
+| updated_at         | INTEGER | No   | Unix epoch milliseconds                                |
 
 Notes:
 
@@ -151,16 +162,18 @@ Because email-based OTP proves control of the approved mailbox, verified-email r
 
 ## 4.3 categories
 
-| Column     | Type    | Null | Description                           |
-| ---------- | ------- | ---- | ------------------------------------- |
-| user_id    | TEXT    | No   | Owning user                           |
-| id         | TEXT    | No   | UUID resource ID                      |
-| name       | TEXT    | No   | Display name                          |
-| name_key   | TEXT    | No   | Trimmed and normalized uniqueness key |
-| color      | TEXT    | No   | `#RRGGBB` display color               |
-| position   | INTEGER | No   | Manual ordering value, default `0`    |
-| created_at | INTEGER | No   | Unix epoch milliseconds               |
-| updated_at | INTEGER | No   | Unix epoch milliseconds               |
+| Column       | Type    | Null | Description                           |
+| ------------ | ------- | ---- | ------------------------------------- |
+| user_id      | TEXT    | No   | Owning user                           |
+| id           | TEXT    | No   | UUID resource ID                      |
+| name         | TEXT    | No   | Display name                          |
+| name_key     | TEXT    | No   | Trimmed and normalized uniqueness key |
+| color        | TEXT    | No   | `#RRGGBB` display color               |
+| symbol_type  | TEXT    | Yes  | `icon`, `emoji`, or `NULL`            |
+| symbol_value | TEXT    | Yes  | Icon token, one emoji, or `NULL`      |
+| position     | INTEGER | No   | Manual ordering value, default `0`    |
+| created_at   | INTEGER | No   | Unix epoch milliseconds               |
+| updated_at   | INTEGER | No   | Unix epoch milliseconds               |
 
 Primary key: `(user_id, id)`.
 
@@ -168,16 +181,18 @@ Primary key: `(user_id, id)`.
 
 ## 4.4 payment_methods
 
-| Column     | Type    | Null | Description                                   |
-| ---------- | ------- | ---- | --------------------------------------------- |
-| user_id    | TEXT    | No   | Owning user                                   |
-| id         | TEXT    | No   | UUID resource ID                              |
-| name       | TEXT    | No   | Display name, such as `Visa` or `Apple`       |
-| kind       | TEXT    | No   | `card`, `wallet`, `bank`, `store`, or `other` |
-| label      | TEXT    | Yes  | Optional safe label, such as `•••• 1234`      |
-| position   | INTEGER | No   | Manual ordering value, default `0`            |
-| created_at | INTEGER | No   | Unix epoch milliseconds                       |
-| updated_at | INTEGER | No   | Unix epoch milliseconds                       |
+| Column       | Type    | Null | Description                                   |
+| ------------ | ------- | ---- | --------------------------------------------- |
+| user_id      | TEXT    | No   | Owning user                                   |
+| id           | TEXT    | No   | UUID resource ID                              |
+| name         | TEXT    | No   | Display name, such as `Visa` or `Apple`       |
+| kind         | TEXT    | No   | `card`, `wallet`, `bank`, `store`, or `other` |
+| label        | TEXT    | Yes  | Optional safe label, such as `•••• 1234`      |
+| symbol_type  | TEXT    | Yes  | `icon`, `emoji`, or `NULL`                    |
+| symbol_value | TEXT    | Yes  | Icon token, one emoji, or `NULL`              |
+| position     | INTEGER | No   | Manual ordering value, default `0`            |
+| created_at   | INTEGER | No   | Unix epoch milliseconds                       |
+| updated_at   | INTEGER | No   | Unix epoch milliseconds                       |
 
 Primary key: `(user_id, id)`.
 
@@ -202,6 +217,8 @@ The application never stores a full card number, bank credential, or payment sec
 | archived_at       | INTEGER | Yes  | Time the record was archived                  |
 | category_id       | TEXT    | Yes  | Optional same-user category                   |
 | payment_method_id | TEXT    | Yes  | Optional same-user payment method             |
+| symbol_type       | TEXT    | Yes  | `icon`, `emoji`, or `NULL`                    |
+| symbol_value      | TEXT    | Yes  | Icon token, one emoji, or `NULL`              |
 | website_url       | TEXT    | Yes  | Optional HTTPS or HTTP URL                    |
 | notes             | TEXT    | Yes  | Optional user notes                           |
 | created_at        | INTEGER | No   | Unix epoch milliseconds                       |
@@ -224,7 +241,34 @@ Recurrence invariants:
 - `end_of_month` always selects the final day of each target month.
 - February 29 yearly schedules clamp to February's final day in non-leap years and return to February 29 in leap years.
 
-## 5. Proposed MVP DDL
+## 4.6 fx_snapshot
+
+Stores one complete validated provider publication.
+
+| Column        | Type    | Null | Description                                 |
+| ------------- | ------- | ---- | ------------------------------------------- |
+| id            | INTEGER | No   | Singleton primary key fixed to `1`          |
+| provider      | TEXT    | No   | Provider key; initially `ecb`               |
+| rate_date     | TEXT    | No   | Provider reference date in `YYYY-MM-DD`     |
+| base_currency | TEXT    | No   | Provider base; `EUR` for ECB                |
+| fetched_at    | INTEGER | No   | Successful fetch time in epoch milliseconds |
+| rate_count    | INTEGER | No   | Number of validated rates in the snapshot   |
+
+Primary key: `id`. Exactly one row exists. A successful refresh atomically replaces
+this row and every associated rate; the database does not accumulate FX history.
+
+## 4.7 fx_rates
+
+| Column        | Type    | Null | Description                                    |
+| ------------- | ------- | ---- | ---------------------------------------------- |
+| snapshot_id   | INTEGER | No   | Fixed to `1`; foreign-key and primary-key part |
+| currency      | TEXT    | No   | Uppercase quote currency and primary-key part  |
+| units_per_eur | TEXT    | No   | Canonical positive decimal units per EUR       |
+
+Primary key: `(snapshot_id, currency)`. `snapshot_id` references `fx_snapshot(id)`
+with `ON DELETE CASCADE`. Every snapshot includes `EUR = 1`.
+
+## 5. Target DDL
 
 This DDL is intended to be migration-ready, but it remains a planning artifact until the model is approved and exercised against local D1.
 
@@ -235,14 +279,14 @@ CREATE TABLE users (
   email_normalized TEXT NOT NULL UNIQUE,
   display_name TEXT,
   timezone TEXT NOT NULL DEFAULT 'UTC',
-  default_currency TEXT NOT NULL DEFAULT 'USD',
+  reporting_currency TEXT NOT NULL DEFAULT 'USD',
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   CHECK (length(id) BETWEEN 1 AND 64),
   CHECK (length(trim(primary_email)) > 3),
   CHECK (
-    length(default_currency) = 3
-    AND default_currency = upper(default_currency)
+    length(reporting_currency) = 3
+    AND reporting_currency = upper(reporting_currency)
   )
 ) STRICT;
 
@@ -272,6 +316,8 @@ CREATE TABLE categories (
   name TEXT NOT NULL,
   name_key TEXT NOT NULL,
   color TEXT NOT NULL DEFAULT '#6B7280',
+  symbol_type TEXT,
+  symbol_value TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -279,6 +325,10 @@ CREATE TABLE categories (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CHECK (length(trim(name)) BETWEEN 1 AND 80),
   CHECK (length(name_key) BETWEEN 1 AND 160),
+  CHECK (length(color) = 7 AND substr(color, 1, 1) = '#'),
+  CHECK (symbol_type IS NULL OR symbol_type IN ('icon', 'emoji')),
+  CHECK ((symbol_type IS NULL) = (symbol_value IS NULL)),
+  CHECK (symbol_value IS NULL OR length(symbol_value) BETWEEN 1 AND 64),
   CHECK (position >= 0)
 ) STRICT;
 
@@ -291,6 +341,8 @@ CREATE TABLE payment_methods (
   name TEXT NOT NULL,
   kind TEXT NOT NULL DEFAULT 'other',
   label TEXT,
+  symbol_type TEXT,
+  symbol_value TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -298,6 +350,10 @@ CREATE TABLE payment_methods (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CHECK (length(trim(name)) BETWEEN 1 AND 80),
   CHECK (kind IN ('card', 'wallet', 'bank', 'store', 'other')),
+  CHECK (label IS NULL OR length(label) <= 80),
+  CHECK (symbol_type IS NULL OR symbol_type IN ('icon', 'emoji')),
+  CHECK ((symbol_type IS NULL) = (symbol_value IS NULL)),
+  CHECK (symbol_value IS NULL OR length(symbol_value) BETWEEN 1 AND 64),
   CHECK (position >= 0)
 ) STRICT;
 
@@ -317,6 +373,8 @@ CREATE TABLE subscriptions (
   archived_at INTEGER,
   category_id TEXT,
   payment_method_id TEXT,
+  symbol_type TEXT,
+  symbol_value TEXT,
   website_url TEXT,
   notes TEXT,
   created_at INTEGER NOT NULL,
@@ -330,6 +388,9 @@ CREATE TABLE subscriptions (
   CHECK (length(trim(name)) BETWEEN 1 AND 120),
   CHECK (amount_micros BETWEEN 0 AND 9007199254740991),
   CHECK (length(currency) = 3 AND currency = upper(currency)),
+  CHECK (symbol_type IS NULL OR symbol_type IN ('icon', 'emoji')),
+  CHECK ((symbol_type IS NULL) = (symbol_value IS NULL)),
+  CHECK (symbol_value IS NULL OR length(symbol_value) BETWEEN 1 AND 64),
   CHECK (recurrence_unit IN ('day', 'week', 'month', 'year')),
   CHECK (recurrence_count BETWEEN 1 AND 1200),
   CHECK (billing_anchor_on GLOB '????-??-??'),
@@ -369,11 +430,37 @@ CREATE INDEX idx_subscriptions_category
 
 CREATE INDEX idx_subscriptions_payment_method
   ON subscriptions(user_id, payment_method_id);
+
+CREATE TABLE fx_snapshot (
+  id INTEGER PRIMARY KEY,
+  provider TEXT NOT NULL,
+  rate_date TEXT NOT NULL,
+  base_currency TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  rate_count INTEGER NOT NULL,
+  CHECK (id = 1),
+  CHECK (provider = 'ecb'),
+  CHECK (rate_date GLOB '????-??-??'),
+  CHECK (length(base_currency) = 3 AND base_currency = upper(base_currency)),
+  CHECK (rate_count > 0)
+) STRICT;
+
+CREATE TABLE fx_rates (
+  snapshot_id INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  units_per_eur TEXT NOT NULL,
+  PRIMARY KEY (snapshot_id, currency),
+  FOREIGN KEY (snapshot_id)
+    REFERENCES fx_snapshot(id) ON DELETE CASCADE,
+  CHECK (snapshot_id = 1),
+  CHECK (length(currency) = 3 AND currency = upper(currency)),
+  CHECK (length(units_per_eur) BETWEEN 1 AND 64)
+) STRICT;
 ```
 
-All MVP tables use SQLite `STRICT` mode so that stored values cannot silently drift away from the declared D1 types. The visible-list and upcoming-charge indexes serve different filters. Their final column order should be checked with actual query plans after representative data is available.
+All target tables use SQLite `STRICT` mode so stored values cannot silently drift away from declared D1 types. Domain validation still proves that rate strings are canonical positive decimals, icon tokens are allow-listed, and emoji contain one grapheme. The visible-list and upcoming-charge indexes serve distinct filters and must be checked with `EXPLAIN QUERY PLAN` after representative data is available.
 
-Migration `0002_resource_limits.sql` adds per-user `BEFORE INSERT` guard triggers for 100 categories, 100 payment methods, and the original 500-subscription limit. Migration `0003_reduce_subscription_limit.sql` replaces only the subscription trigger and lowers that limit to 50 without rewriting an applied migration. These triggers make the no-pagination boundary atomic even when normal creates and import confirmations overlap. They contain no recurrence or calendar logic. The active 50-subscription limit and 30-day dashboard window also bound occurrence expansion for the Workers Free CPU budget.
+The maintainer cutover targets a fresh D1 database, so the implemented migration sequence may be squashed into one reviewed baseline rather than carrying compatibility migrations into the new database. The baseline retains atomic per-user guard triggers for 100 categories, 100 payment methods, and 50 subscriptions. The old production database remains untouched as a rollback source until explicit acceptance.
 
 ## 6. Ownership and Deletion Rules
 
@@ -463,15 +550,17 @@ LIMIT 1;
 
 The application maps the row to an occurrence response. This lookup is independent of the Dashboard upcoming-window filter.
 
-### 8.4 Category Counts
+### 8.4 Category Breakdown Inputs
 
-The Dashboard count breakdown includes all active, unarchived subscriptions and retains the uncategorized group:
+The Dashboard category breakdown includes all active, unarchived subscriptions, retains the uncategorized group, and projects display symbols. Exact normalized and converted amounts are calculated by the application domain from the selected subscription rows and one FX snapshot.
 
 ```sql
 SELECT
   s.category_id,
   c.name AS category_name,
   c.color AS category_color,
+  c.symbol_type AS category_symbol_type,
+  c.symbol_value AS category_symbol_value,
   COUNT(*) AS subscription_count
 FROM subscriptions AS s
 LEFT JOIN categories AS c
@@ -480,11 +569,22 @@ LEFT JOIN categories AS c
 WHERE s.user_id = ?
   AND s.status = 'active'
   AND s.archived_at IS NULL
-GROUP BY s.category_id, c.name, c.color
+GROUP BY
+  s.category_id,
+  c.name,
+  c.color,
+  c.symbol_type,
+  c.symbol_value
 ORDER BY subscription_count DESC, category_name;
 ```
 
-### 8.5 Safe Resource Lookup
+### 8.5 Payment-method Breakdown Inputs
+
+Payment-method breakdowns follow the same active, unarchived filter and retain a `NULL`
+group for subscriptions without a payment method. The query projects name, kind,
+symbol fields, and count; the application layer owns exact reporting calculations.
+
+### 8.6 Safe Resource Lookup
 
 ```sql
 SELECT *
@@ -493,6 +593,12 @@ WHERE user_id = ? AND id = ?;
 ```
 
 No repository method may look up a tenant-owned resource by `id` alone.
+
+### 8.7 Current FX Snapshot
+
+Read `fx_snapshot` at singleton ID `1` and all `fx_rates` for the same snapshot in one
+repository operation. The application validates completeness for the currencies in the
+Dashboard request before producing combined estimates.
 
 ## 9. Future Extensions
 
@@ -526,11 +632,7 @@ The following tables can be added without changing the MVP ownership model.
 - Delivery status and provider message ID.
 - A uniqueness constraint preventing duplicate delivery for the same occurrence, lead time, and channel.
 
-### 9.5 fx_rates
-
-Exchange rates are deployment-global reference data rather than user-owned data. Rates store base currency, quote currency, effective date, source, and an exact decimal-string representation.
-
-### 9.6 import_runs
+### 9.5 import_runs
 
 Import runs record the user, source format, schema version, start and finish times, counts, and non-sensitive error summaries. Imported external IDs should live in a dedicated mapping table rather than in generic metadata JSON.
 
@@ -554,6 +656,8 @@ The database enforces relational ownership, allowed enum values, non-negative am
 - Decimal-string to micro-unit conversion without precision loss.
 - URL schemes and length limits.
 - Unicode normalization for category name keys.
+- Paired symbol fields, allow-listed icon tokens, and single-grapheme emoji.
+- Complete FX snapshots and canonical positive rate decimals.
 - Recurrence and month-end behavior.
 - Request payload size and note length.
 
@@ -568,6 +672,8 @@ The implemented model confirms:
 - [x] Money uses integer micro-units.
 - [x] Calendar dates use `YYYY-MM-DD`; audit timestamps use Unix milliseconds.
 - [x] Monthly schedules expose an optional end-of-month anchor mode.
+- [x] Combined estimates use deployment-shared, complete FX snapshots without rewriting original subscription money.
+- [x] Presets remain application templates, while persisted symbols use explicit validated fields.
 - [x] `next_billing_on` is a server-maintained materialized value.
 - [x] Category names are unique per user after normalization.
 - [x] Categories and payment methods are detached transactionally before deletion.

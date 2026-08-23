@@ -37,7 +37,7 @@
       "preview_urls": false,
       "vars": {
         "ENVIRONMENT": "preview",
-        "PUBLIC_ORIGIN": "https://preview.example.invalid",
+        "PUBLIC_ORIGIN": "https://preview.example.com",
         "TEAM_DOMAIN": "example.cloudflareaccess.com",
         "POLICY_AUD": "replace-with-preview-access-audience",
       },
@@ -45,6 +45,7 @@
         {
           "binding": "DB",
           "database_name": "open-sublists-preview",
+          "database_id": "00000000-0000-0000-0000-000000000000",
           "migrations_dir": "migrations",
         },
       ],
@@ -55,21 +56,21 @@
       "preview_urls": false,
       "routes": [
         {
-          "pattern": "sublist.hansarnold.uk",
+          "pattern": "sublist.example.com",
           "custom_domain": true,
         },
       ],
       "vars": {
         "ENVIRONMENT": "production",
-        "PUBLIC_ORIGIN": "https://sublist.hansarnold.uk",
-        "TEAM_DOMAIN": "hansarnold.cloudflareaccess.com",
-        "POLICY_AUD": "09cc8fed4ff0249fa0b727a2361127dc8332c6734caa94c4f822fcd7a8f54e7a",
+        "PUBLIC_ORIGIN": "https://sublist.example.com",
+        "TEAM_DOMAIN": "example.cloudflareaccess.com",
+        "POLICY_AUD": "replace-with-production-access-audience",
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "open-sublists-production",
-          "database_id": "6aefdf6a-f0cf-4c55-a252-b14d69c6a808",
+          "database_id": "00000000-0000-0000-0000-000000000000",
           "migrations_dir": "migrations",
         },
       ],

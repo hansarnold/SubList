@@ -10,6 +10,6 @@ describe("tenant uniqueness normalization", () => {
   });
 
   it("normalizes verified email identity keys", () => {
-    expect(normalizeEmailAddress("  Arnold@Example.COM ")).toBe("arnold@example.com");
+    expect(normalizeEmailAddress("  Ada@Example.COM ")).toBe("ada@example.com");
   });
 });

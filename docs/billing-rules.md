@@ -1,8 +1,8 @@
 # OpenSubLists Billing Rules
 
-> Status: MVP specification  
+> Status: Implemented recurrence specification with approved reporting refactor target
 > Last updated: 2026-08-23  
-> Purpose: Define deterministic recurrence and reporting behavior before implementation
+> Purpose: Define deterministic recurrence, estimated reporting, conversion, and rounding behavior
 
 ## 1. Goals
 
@@ -18,15 +18,17 @@ The implementation belongs in a pure TypeScript domain module.
 
 ## 2. Terminology
 
-| Term              | Meaning                                                               |
-| ----------------- | --------------------------------------------------------------------- |
-| Local today       | The current `YYYY-MM-DD` date in the user's configured IANA time zone |
-| Billing anchor    | A known valid occurrence of the recurring charge                      |
-| Recurrence unit   | `day`, `week`, `month`, or `year`                                     |
-| Recurrence count  | Number of recurrence units between charges                            |
-| Calendar-day mode | Preserve the anchor day and clamp only when a target month is shorter |
-| End-of-month mode | Always use the final calendar day of each target month                |
-| Next billing date | The first valid occurrence on or after local today                    |
+| Term               | Meaning                                                               |
+| ------------------ | --------------------------------------------------------------------- |
+| Local today        | The current `YYYY-MM-DD` date in the user's configured IANA time zone |
+| Billing anchor     | A known valid occurrence of the recurring charge                      |
+| Recurrence unit    | `day`, `week`, `month`, or `year`                                     |
+| Recurrence count   | Number of recurrence units between charges                            |
+| Calendar-day mode  | Preserve the anchor day and clamp only when a target month is shorter |
+| End-of-month mode  | Always use the final calendar day of each target month                |
+| Next billing date  | The first valid occurrence on or after local today                    |
+| Reporting currency | The user's selected currency for combined Dashboard estimates         |
+| FX snapshot        | One complete provider rate set with one published reference date      |
 
 The billing anchor does not need to be the first-ever payment. Any known occurrence is sufficient.
 
@@ -206,7 +208,7 @@ The client may preview a calculation, but the server always recalculates it. Cre
 
 The subscription amount represents one recurrence occurrence and is stored as integer micro-units.
 
-### 12.2 Actual Upcoming Cash Flow
+### 12.2 Scheduled Upcoming Cash-flow Estimate
 
 Upcoming-charge totals sum the stored amount for occurrences inside the requested date window. They do not use monthly or annual normalization.
 
@@ -239,10 +241,40 @@ monthly estimate = annualized estimate / 12
 
 ### 12.6 Multiple Currencies
 
-- Values are grouped by currency.
-- Different currencies are never added together in the MVP.
-- No implicit exchange rate is applied.
-- Normalized values are labeled as estimates.
+- Subscription rows and upcoming occurrences retain their original amount and currency.
+- Original-currency totals remain grouped and visible in every Dashboard response.
+- A complete FX snapshot converts normalized and calendar-period values into the user's reporting currency for combined estimates.
+- One response uses one snapshot for every conversion.
+- The server returns no combined amount when any included source currency or the reporting currency cannot be converted. It reports every missing currency instead of silently omitting values or applying a `1:1` rate.
+- Every normalized, scheduled, or converted value is labeled as an estimate.
+
+### 12.7 Calendar-period Estimates
+
+The Dashboard projects the current subscription definitions across the user's complete local calendar month and complete local calendar year. The windows include dates before and after local today.
+
+These values are not historical actual spend. The application has no price history, payment records, or lifecycle history that could prove what happened earlier in the period. A subscription edited, created, cancelled, archived, or deleted during the period changes the estimate produced from the current data.
+
+The recurrence domain must therefore support projecting a schedule into an arbitrary inclusive date window without relying on the materialized future-only `next_billing_on` value.
+
+### 12.8 FX Reference Rates
+
+The initial provider is the European Central Bank daily euro foreign exchange reference-rate series. Let `rate(X)` represent units of currency `X` per EUR and define `rate(EUR) = 1`:
+
+```text
+amount_in_reporting_currency =
+  amount_in_source_currency / rate(source_currency) * rate(reporting_currency)
+```
+
+Provider decimals are parsed into exact rational values. Conversion occurs before final aggregation rounding, and binary floating point is not used for money or rate arithmetic.
+
+The response includes provider, rate date, fetch time, missing currencies, and one of these states:
+
+- `not_needed`: every included source amount already uses the reporting currency, so no provider rate is required.
+- `fresh`: the rate date is no more than seven calendar days before local today.
+- `stale`: a complete older snapshot is used and the UI displays a warning.
+- `unavailable`: no complete conversion can be produced.
+
+A refresh failure never removes the last known-good snapshot. Exchange rates are current estimate inputs only; the application does not retain transaction-date valuations.
 
 ## 13. Required Test Matrix
 
@@ -268,10 +300,16 @@ Additional property tests should verify:
 - Returned occurrences belong to the defined sequence.
 - Projecting an inclusive date window returns every occurrence in order and none after the window end.
 - A short-interval subscription can contribute multiple upcoming charges and the currency total includes each occurrence exactly once.
+- Projecting the complete current month or year includes valid occurrences before local today without treating them as observed payments.
 - Increasing local today never returns an earlier occurrence.
 - Monthly calculations never drift from the original anchor.
 - Yearly February 29 calculations return to February 29 in leap years.
 - Large historical gaps complete without occurrence-by-occurrence loops.
+- EUR-to-EUR, EUR-to-foreign, foreign-to-EUR, and foreign-to-foreign conversion use exact rational arithmetic.
+- Same-currency reporting succeeds without a provider snapshot.
+- USD and CNY original totals remain separate while a complete snapshot produces one reporting-currency total.
+- Missing rates suppress every combined total and identify every missing currency.
+- Stale complete snapshots produce estimates with a stale state.
 
 ## 14. Invalid Inputs
 
@@ -290,7 +328,9 @@ Reject:
 - Trial periods and introductory offers.
 - Partial billing periods or prorating.
 - Actual payment transaction reconciliation.
+- Paid, unpaid, refund, and settlement state.
 - Pause periods and automatic resumption.
 - Business-day adjustment for weekends or holidays.
 - Provider-specific billing calendars.
-- Exchange-rate conversion.
+- Historical or transaction-date FX valuation.
+- User-entered exchange rates.

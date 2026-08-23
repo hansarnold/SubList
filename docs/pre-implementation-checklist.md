@@ -1,6 +1,6 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: First hosted production deployment online; lifecycle smoke test pending
+> Status: First hosted deployment online; reporting, presets, and symbols refactor planned
 > Last updated: 2026-08-23
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
@@ -43,7 +43,7 @@ Evidence: [Product Plan](./plan.md), [API Contract](./api-contract.md), and [Env
 
 ## 4. Data Model
 
-- [x] MVP tables defined.
+- [x] Current tables and refactor target tables defined.
 - [x] External identities separated from application users.
 - [x] Composite tenant keys and foreign keys defined.
 - [x] Money, date, timestamp, and ID representations defined.
@@ -51,7 +51,7 @@ Evidence: [Product Plan](./plan.md), [API Contract](./api-contract.md), and [Env
 - [x] Category normalization defined.
 - [x] D1 `STRICT` DDL drafted and syntax-tested.
 - [x] Deletion and cascade behavior tested with representative SQLite operations.
-- [x] Future extension tables described.
+- [x] FX singleton snapshot, symbol columns, and remaining future extensions described.
 
 Evidence: [Data Model](./data-model.md)
 
@@ -64,7 +64,9 @@ Evidence: [Data Model](./data-model.md)
 - [x] Time-zone change behavior defined.
 - [x] Materialized next-date reconciliation defined.
 - [x] Exact annualized and monthly formulas defined.
-- [x] Multi-currency separation defined.
+- [x] Original-currency preservation and complete reporting-currency conversion defined.
+- [x] Monthly average, annualized, complete current-month, and complete current-year estimate semantics defined.
+- [x] ECB snapshot freshness, completeness, and failure behavior defined.
 - [x] Upcoming totals and lists expand every recurrence occurrence inside the requested window.
 - [x] Required example and property-test matrix defined.
 
@@ -77,7 +79,8 @@ Evidence: [Billing Rules](./billing-rules.md)
 - [x] Request and response conventions defined.
 - [x] Resource schemas defined.
 - [x] CRUD and lifecycle endpoints defined.
-- [x] Dashboard next-charge, occurrence-list, and category-count responses defined.
+- [x] Dashboard next-charge, occurrence-list, reporting-currency, original-currency, category, and payment responses defined.
+- [x] Resource symbol and category batch-create contracts defined.
 - [x] Error envelope and status codes defined.
 - [x] Request limits defined.
 - [x] Cache, origin, and logging rules defined.
@@ -88,12 +91,12 @@ Evidence: [API Contract](./api-contract.md)
 ## 7. Import and Export
 
 - [x] Versioned JSON archive envelope defined.
-- [x] Exact V1 resource records defined.
+- [x] Target current-version resource records defined, including symbols and reporting currency.
 - [x] Derived fields excluded and recalculated.
 - [x] Preview and confirmation workflow defined.
 - [x] Skip, overwrite, and duplicate conflict strategies defined.
 - [x] Atomicity and size limits defined.
-- [x] Archive evolution policy defined.
+- [x] Current-only archive and offline maintainer transformation policy defined.
 - [x] Native SubList adapter policy and warning behavior defined.
 - [x] Security and privacy rules defined.
 
@@ -111,6 +114,7 @@ Evidence: [Import and Export](./import-export.md)
 - [x] Loading, empty, error, and session-expired states defined.
 - [x] Accessibility requirements defined.
 - [x] English and Simplified Chinese localization requirement defined.
+- [x] Localized preset catalogs and accessible common-icon/emoji picker defined.
 
 Evidence: [MVP UI Flow](./ui-flow.md)
 
@@ -139,7 +143,7 @@ The local scaffold and implementation are complete:
 - [x] Pin Node.js in repository metadata and pin pnpm through the `packageManager` field.
 - [x] Create `package.json`, the pnpm lockfile, and the formatting, linting, type-checking, and test scripts.
 - [x] Install Wrangler locally as a development dependency; a global Wrangler installation is neither required nor preferred.
-- [x] Create `wrangler.jsonc` with loopback-safe local values and fail-closed preview/production placeholders.
+- [x] Create `wrangler.example.jsonc` with loopback-safe local values and fail-closed hosted placeholders, while keeping operator-owned values in ignored `wrangler.local.jsonc`.
 - [x] Generate the Worker `Env` type from the Wrangler configuration.
 - [x] Create and locally apply the numbered D1 migrations.
 - [x] Add the CI workflow for install, formatting, linting, type checking, tests, and bundle validation.
@@ -161,4 +165,17 @@ These inputs do not block local use:
 
 ## 12. Next Delivery Step
 
-Complete the hosted subscription create/edit/archive/unarchive smoke test. Provision preview resources before the next release cycle.
+Implement the approved [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md), rehearse its data cutover against temporary local and remote D1 databases, and complete the existing hosted lifecycle smoke test before switching production data.
+
+## 13. Refactor Implementation Gate
+
+- [ ] Implement target symbol, preset, FX, reporting, API, and archive domain types.
+- [ ] Implement and test the fresh target D1 baseline.
+- [ ] Implement the ECB adapter, singleton snapshot replacement, and daily scheduled handler.
+- [ ] Implement combined Dashboard estimates and original-currency transparency.
+- [ ] Implement first-run category quick add and payment preset prefills.
+- [ ] Implement shared common-icon and single-emoji selection and rendering.
+- [ ] Complete English and Simplified Chinese responsive and accessibility QA.
+- [ ] Preserve raw production export, D1 backup, transformed export, hashes, and review report.
+- [ ] Rehearse and verify the cutover before changing the production D1 binding.
+- [ ] Keep the previous Worker/database pair available until explicit maintainer acceptance.

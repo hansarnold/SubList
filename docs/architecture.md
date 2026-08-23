@@ -1,6 +1,6 @@
 # OpenSubLists Architecture and Technology Decisions
 
-> Status: Selected for MVP  
+> Status: Implemented baseline with approved reporting refactor
 > Last updated: 2026-08-23  
 > Deployment target: Cloudflare Workers and D1
 
@@ -19,7 +19,7 @@ Full-stack Worker
    ├── Access JWT middleware
    ├── Application services
    ├── D1 repositories
-   └── Optional scheduled handler
+   └── Scheduled ECB rate-refresh handler
              │
              ▼
              D1
@@ -29,14 +29,14 @@ The MVP is one deployable Worker plus one D1 database per environment. Worker co
 
 ## 2. Language Choices
 
-| Layer                    | Choice                         |
-| ------------------------ | ------------------------------ |
-| D1 schema and migrations | SQL using SQLite semantics     |
-| D1 queries               | Parameterized SQL              |
-| Worker and API           | TypeScript                     |
-| Domain logic             | Runtime-independent TypeScript |
-| Frontend                 | React with TypeScript/TSX      |
-| Runtime configuration    | `wrangler.jsonc`               |
+| Layer                    | Choice                                                       |
+| ------------------------ | ------------------------------------------------------------ |
+| D1 schema and migrations | SQL using SQLite semantics                                   |
+| D1 queries               | Parameterized SQL                                            |
+| Worker and API           | TypeScript                                                   |
+| Domain logic             | Runtime-independent TypeScript                               |
+| Frontend                 | React with TypeScript/TSX                                    |
+| Runtime configuration    | `wrangler.example.jsonc` template plus ignored operator copy |
 
 TypeScript is the single application language so frontend previews, API schemas, and domain types can share definitions without maintaining a second implementation.
 
@@ -119,12 +119,14 @@ src/
 │   ├── billing/
 │   ├── money/
 │   ├── statistics/
+│   ├── symbols/
 │   └── validation/
 ├── application/
 │   ├── subscriptions/
 │   ├── categories/
 │   ├── payment-methods/
 │   ├── dashboard/
+│   ├── fx/
 │   └── ports/
 ├── worker/
 │   ├── index.ts
@@ -134,15 +136,19 @@ src/
 │   │   ├── repositories/
 │   │   └── rows/
 │   ├── jobs/
+│   ├── providers/
 │   └── observability/
 ├── web/
 │   ├── app/
 │   ├── components/
 │   ├── features/
 │   ├── i18n/
+│   ├── presets/
+│   ├── symbols/
 │   └── styles/
 └── shared/
-    └── api-types/
+    ├── api-types/
+    └── icon-tokens/
 
 migrations/
 tests/
@@ -193,7 +199,7 @@ Owns canonical decimal parsing, safe micro-unit conversion, exact rational repor
 
 ### 7.3 Statistics
 
-Owns grouping by currency and category, upcoming cash flow, monthly estimates, and annualized estimates.
+Owns original-currency grouping, exact FX conversion, reporting-currency aggregation, calendar-period projections, category and payment-method breakdowns, and monthly and annualized estimates.
 
 ### 7.4 Identity
 
@@ -201,7 +207,7 @@ Authentication verification is infrastructure. Stable user resolution and extern
 
 ## 8. Configuration
 
-Worker environment bindings are represented by a generated `Env` type. Runtime types are regenerated with `wrangler types` whenever Wrangler configuration changes.
+Worker environment bindings are represented by a generated `Env` type. Runtime types are regenerated from `wrangler.example.jsonc` with non-literal variable types whenever binding configuration changes. Operator-owned values live only in the ignored `wrangler.local.jsonc` file.
 
 Configuration is validated once per isolate or request initialization path and exposed as a typed object. Missing production authentication settings fail closed.
 
@@ -223,8 +229,9 @@ No environment binding is read directly from domain modules.
 - Access JWKS data may be cached by the remote-key client.
 - JWT verification and authorization decisions run on every request.
 - D1 business results are not cached in the MVP.
+- The singleton last known-good FX snapshot is persisted reference data in D1, not a cached authenticated API response.
 
-## 11. Compatibility and Portability
+## 11. Platform Compatibility and Data Portability
 
 - Set an explicit Workers compatibility date and update it intentionally.
 - Generate Worker types from the actual Wrangler configuration.
@@ -232,6 +239,7 @@ No environment binding is read directly from domain modules.
 - Domain code uses standard TypeScript and web-platform primitives.
 - SQL remains valid for D1's supported SQLite subset.
 - Export data is independent of D1 row layout.
+- While the deployment has one maintainer, the runtime supports only the current application database and archive shape. Approved breaking refactors use an offline export, deterministic transformation, verification report, fresh D1 target, and preserved rollback database rather than dual-read compatibility.
 
 ## 12. Change Triggers
 
@@ -255,3 +263,5 @@ Revisit these decisions only with concrete evidence:
 - [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/)
 - [D1 SQL API](https://developers.cloudflare.com/d1/sql-api/)
 - [D1 Workers Binding API](https://developers.cloudflare.com/d1/worker-api/)
+- [Cloudflare Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+- [ECB Data API](https://data.ecb.europa.eu/help/api/data)

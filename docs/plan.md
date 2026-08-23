@@ -1,12 +1,12 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: First private Cloudflare production deployment online
+> Status: MVP implemented; reporting, presets, and symbols refactor approved
 >
 > Last updated: 2026-08-23
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 2 in progress; hosted lifecycle smoke test pending
+> Current phase: Phase 2 remains in progress; Phase 3 refactor specification is complete and implementation is pending
 
 ## 1. Project Overview
 
@@ -27,7 +27,7 @@ The first deployment will primarily serve the maintainer. A small number of frie
 2. **Data correctness comes first.** Money, billing intervals, month-end dates, and time zones must not depend on ambiguous floating-point or date behavior.
 3. **Private by default.** Authentication is invite-only, and every business query must be scoped to the current user.
 4. **Portable data.** Standard JSON import and export must prevent deployment lock-in.
-5. **Progressive enhancement.** Complete tracking and reporting before adding email reminders, exchange rates, and advanced imports.
+5. **Progressive enhancement.** Complete the approved estimated-reporting and organization workflow before adding reminders, actual transaction data, or advanced imports.
 6. **Cloudflare-native without unnecessary coupling.** The runtime targets Workers and D1, while core business rules remain independently testable TypeScript modules.
 
 ## 3. Reference Product and Scope Decisions
@@ -48,8 +48,11 @@ Sign in → Review subscriptions → Add or edit → Review upcoming charges and
 - Daily, weekly, monthly, and yearly billing intervals with interval multipliers.
 - Next billing date calculation.
 - Monthly average, annualized, category, and upcoming-charge summaries.
-- Separate summaries for each currency.
-- Default currency and time-zone settings.
+- Combined estimated monthly, annualized, current-month, and current-year summaries in a user-selected reporting currency.
+- Exact original-currency breakdowns and visible FX source, date, freshness, and failure state.
+- Reporting-currency and time-zone settings.
+- Localized category and payment-method creation presets.
+- Allow-listed common icons or one emoji for categories, payment methods, and subscriptions.
 - JSON import and export.
 - One responsive website for narrow and wide browser viewports.
 
@@ -57,7 +60,7 @@ Sign in → Review subscriptions → Add or edit → Review upcoming charges and
 
 - Public registration and an in-app invitation system.
 - App Store or screenshot-based AI import.
-- Image uploads, a subscription icon library, and category backgrounds.
+- Image uploads, remote favicons, a comprehensive subscription-brand logo library, and category backgrounds.
 - Browser push notifications.
 - Native calendar or reminders integration.
 - Family sharing, shared payments, and subscription cost splitting.
@@ -86,7 +89,7 @@ Full-stack Worker
              D1
 ```
 
-The initial deployment uses one Worker. Static assets, the API, and optional scheduled handlers remain in one deployment unit. Scheduled work should move to a separate Worker only when permissions, execution time, deployment cadence, or fault isolation create a concrete need.
+The initial deployment uses one Worker. Static assets, the API, and the approved daily ECB rate-refresh `scheduled()` handler remain in one deployment unit. Scheduled work should move to a separate Worker only when permissions, execution time, deployment cadence, or fault isolation create a concrete need.
 
 ### 4.2 Components Not Needed Initially
 
@@ -166,21 +169,23 @@ The application does not cache authorization decisions by default. User roles an
 
 ## 7. Core Data Model
 
-The MVP uses five `STRICT` D1 tables:
+The refactor target uses seven `STRICT` D1 tables:
 
 - `users`
 - `auth_identities`
 - `categories`
 - `payment_methods`
 - `subscriptions`
+- `fx_snapshot`
+- `fx_rates`
 
-External authentication identities are separate from stable application users. Every business table uses `user_id` as its tenant boundary, and tenant-owned relationships use composite foreign keys. Subscription lifecycle state is `active` or `cancelled`; `archived_at` is an independent visibility state. Pause periods and price history are deferred to dedicated future tables.
+External authentication identities are separate from stable application users. Every tenant-owned business table uses `user_id` as its boundary, while provider FX snapshots are deployment-shared reference data. Categories, payment methods, and subscriptions store a validated icon token or emoji symbol. Subscription lifecycle state is `active` or `cancelled`; `archived_at` is an independent visibility state. Pause periods, price history, and actual transactions remain out of scope.
 
 The migration-ready DDL, indexes, constraints, normalization rules, and extension paths are defined in [Data Model](./data-model.md).
 
 ## 8. Money and Reporting Rules
 
-Persisted amounts use integer micro-units; API amounts use canonical decimal strings. Reporting retains exact rational values through aggregation and rounds only at the response boundary. Different currencies remain separate, and normalized monthly or annual values are labeled as estimates.
+Persisted subscription amounts use integer micro-units in their original currencies; API amounts and provider rates use canonical decimal strings. Reporting retains exact rational values through normalization, ECB cross-rate conversion, and aggregation, then rounds only at the response boundary. The Dashboard combines complete estimates into the user's reporting currency and retains exact original-currency breakdowns. Every combined value is labeled as an estimate and includes the FX source and rate date.
 
 Exact formulas, rounding rules, recurrence semantics, and the required test matrix are defined in [Billing Rules](./billing-rules.md).
 
@@ -192,7 +197,7 @@ Billing dates are local calendar dates. The next occurrence is inclusive of loca
 
 ## 10. Pages and User Flows
 
-The MVP is a responsive website only; there are no native macOS or iOS clients. It includes Dashboard, Subscriptions, and Settings. It uses sidebar navigation at wide browser widths and bottom navigation at narrow widths. The visible English label for the Dashboard route is Overview. Its wide-browser view prioritizes the next charge and a grouped 30-day renewal agenda, followed by separate per-currency estimates and a count-based category summary. The wide-browser Subscriptions route uses a responsive card grid by default with an optional compact list view, plus search, sorting, and tenant-scoped filters. Create and edit forms prioritize name, amount, frequency, and billing anchor while placing end-of-month behavior and notes behind progressive disclosure.
+The MVP is a responsive website only; there are no native macOS or iOS clients. It includes Dashboard, Subscriptions, and Settings. It uses sidebar navigation at wide browser widths and bottom navigation at narrow widths. The visible English label for the Dashboard route is Overview. Its wide-browser view leads with combined reporting-currency estimates and rate metadata, then preserves the next charge, grouped renewal agenda, original-currency breakdown, and category summary. Category onboarding offers a reviewed preset bundle; category and payment settings offer localized templates; all three resource editors share an accessible common-icon and emoji picker. The wide-browser Subscriptions route retains a responsive card grid with an optional compact list view, search, sorting, and tenant-scoped filters.
 
 Responsive behavior, lifecycle actions, accessibility, localization, empty states, and acceptance flows are defined in [MVP UI Flow](./ui-flow.md).
 
@@ -204,7 +209,7 @@ Endpoints, payloads, errors, request limits, security headers, and contract test
 
 ## 12. Migration from SubList
 
-OpenSubLists uses a versioned, user-owned JSON archive. Native SubList migration is an adapter into that archive model and never writes directly to D1. Unsupported pause, price, offer, and image fields produce explicit warnings.
+OpenSubLists uses a user-owned JSON archive. The maintainer's reporting-and-symbol cutover uses a one-purpose local transformer and a new D1 database rather than permanent runtime support for the old archive or database shape. Native SubList migration remains an adapter into the current archive model and never writes directly to D1.
 
 The archive schema, conflict strategies, security model, validation pipeline, and native mapping policy are defined in [Import and Export](./import-export.md).
 
@@ -243,7 +248,7 @@ Completion criterion: The maintainer can manage all subscriptions locally.
 
 - [x] Create the production D1 database and configure the production Worker, hostname, and binding metadata.
 - [x] Configure Access OTP, the initial email allowlist, and the real production audience.
-- [x] Apply production migrations and deploy the Worker to `sublist.hansarnold.uk`.
+- [x] Apply production migrations and deploy the Worker to the configured production hostname.
 - [x] Verify unauthenticated Access redirects and the absence of alternate Worker entry points.
 - [x] Complete the authenticated OTP, JWT validation, and first-user provisioning smoke test.
 - [ ] Complete a hosted subscription create, edit, archive, and unarchive smoke test.
@@ -254,7 +259,22 @@ Completion criterion: The maintainer can manage all subscriptions locally.
 
 Completion criterion: The maintainer can use the application reliably, and accounts cannot access one another's data.
 
-### Phase 3: Friend Preview
+### Phase 3: Reporting, Presets, and Symbols Refactor — Planned
+
+- [x] Approve estimated reporting semantics and explicitly reject an actual transaction ledger.
+- [x] Select ECB daily reference rates and a one-Worker scheduled refresh design.
+- [x] Define localized category and payment-method template catalogs.
+- [x] Define common-icon and emoji storage, validation, rendering, and fallbacks.
+- [x] Define the one-time maintainer cutover and rollback path.
+- [ ] Implement the target schema, FX provider, scheduled refresh, Dashboard contract, presets, and symbols.
+- [ ] Rehearse the data cutover against temporary local and remote D1 databases.
+- [ ] Cut over production only after backup, review-table approval, and verification.
+
+Completion criterion: The Dashboard provides complete reporting-currency estimates with visible rate metadata, presets create editable ordinary rows, symbols render safely, and the maintainer's original data is verified in the new schema.
+
+The detailed implementation order and cutover gates are defined in [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md).
+
+### Phase 4: Friend Preview
 
 - [ ] Add first-run setup guidance.
 - [x] Improve empty states, error messages, and mobile behavior.
@@ -265,11 +285,11 @@ Completion criterion: The maintainer can use the application reliably, and accou
 
 Completion criterion: A new user can record their first subscription without developer guidance.
 
-### Phase 4: Demand-driven Enhancements
+### Phase 5: Demand-driven Enhancements
 
 - Email reminders.
-- Daily exchange rates and default-currency estimates.
 - Price history and pause periods.
+- Actual transaction tracking only if the product stops being an estimate-only ledger.
 - An iCalendar subscription feed.
 - Installable PWA support.
 - Optional public registration or in-app invitations.
@@ -282,7 +302,9 @@ Completion criterion: A new user can record their first subscription without dev
 - User time zones crossing calendar-day boundaries.
 - Exclusion rules for cancelled and archived subscriptions.
 - Money parsing, rounding, and formatting.
-- Prevention of accidental cross-currency totals.
+- Exact multi-currency conversion into one reporting currency without losing original-currency totals.
+- Missing and stale FX behavior, one-snapshot consistency, and provider-failure fallback.
+- Preset localization, symbol validation, and accessible icon/emoji selection.
 - Cross-user access attempts on every resource endpoint.
 - Repeated JSON imports and rollback after failed imports.
 
@@ -300,7 +322,6 @@ The following do not block the first hosted deployment:
 
 1. A redacted native SubList JSON export is still required before its adapter can be finalized.
 2. The first reminder channel remains deferred until reminders enter the approved scope.
-3. Exchange-rate provider selection remains deferred until currency conversion enters the approved scope.
 
 ## 18. Current Decisions
 
@@ -309,7 +330,8 @@ The following do not block the first hosted deployment:
 - Initial access is invite-only with no public registration.
 - Cloudflare Access OTP is the preferred identity solution.
 - Hosted users authenticate with email PINs; the application does not store passwords.
-- The maintainer production hostname is `sublist.hansarnold.uk`.
+- The repository tracks a fail-closed `wrangler.example.jsonc`; each operator keeps real hosted resource values in ignored `wrangler.local.jsonc`.
+- The project is licensed under the MIT License.
 - TypeScript is the application language; D1 schema and queries use explicit SQL.
 - The MVP uses React, Vite, Hono, Zod, Vitest, Wrangler, and pnpm without an ORM.
 - The initial scaffold targets Node.js 24 LTS; exact dependency and package-manager versions are pinned in repository metadata.
@@ -318,7 +340,11 @@ The following do not block the first hosted deployment:
 - Authorization decisions and authenticated API responses are not shared-cacheable; authenticated APIs default to `Cache-Control: private, no-store`.
 - Only content-hashed static assets receive long-lived public caching.
 - The MVP does not include image storage.
-- The MVP does not force cross-currency totals.
+- The Dashboard combines complete estimates in the user's reporting currency with ECB daily reference rates and always retains original-currency totals.
+- Combined values are estimates only; the product has no payment or transaction ledger.
+- Category and payment-method presets are localized creation templates copied into ordinary tenant rows.
+- Categories, payment methods, and subscriptions may store an allow-listed common icon token or one emoji.
+- The initial FX refresh runs as a Cron Trigger on the existing full-stack Worker and atomically replaces one last known-good snapshot in D1.
 - Money is stored as integer micro-units.
 - Subscription lifecycle state is active or cancelled; archiving is independent and is the default removal action.
 - Pause periods and price history are deferred to dedicated tables.
@@ -337,3 +363,5 @@ The following do not block the first hosted deployment:
 - [Cloudflare Access Application Token](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
 - [Cloudflare Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - [Cloudflare Workers Pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+- [ECB Data API](https://data.ecb.europa.eu/help/api/data)
+- [ECB euro foreign exchange reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html)

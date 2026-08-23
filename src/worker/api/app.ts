@@ -29,6 +29,8 @@ type Variables = {
 
 type AppHono = { Bindings: Env; Variables: Variables };
 
+const applicationEnvironmentSchema = z.enum(["local", "preview", "production"]);
+
 export type RequestAuthenticator = (
   request: Request,
   env: Env,
@@ -76,7 +78,7 @@ export function createApp(
   app.get("/api/v1/session", (context) => {
     const data: Session = {
       user: toApiUser(context.get("user")),
-      environment: context.env.ENVIRONMENT,
+      environment: applicationEnvironmentSchema.parse(context.env.ENVIRONMENT),
     };
     return context.json({ data });
   });

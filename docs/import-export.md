@@ -1,9 +1,9 @@
 # OpenSubLists Import and Export Format
 
-> Status: MVP archive specification  
+> Status: Approved refactor target archive specification
 > Last updated: 2026-08-23  
 > Media type: `application/json`  
-> Current schema version: `1`
+> Current target schema version: `2`
 
 ## 1. Goals
 
@@ -29,7 +29,7 @@ The archive format must:
 ```json
 {
   "format": "opensublists",
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "archiveId": "550e8400-e29b-41d4-a716-446655440000",
   "exportedAt": "2026-08-23T08:15:30.123Z",
   "generator": {
@@ -37,9 +37,9 @@ The archive format must:
     "version": "0.1.0"
   },
   "profile": {
-    "displayName": "Arnold",
+    "displayName": "Example User",
     "timezone": "Asia/Shanghai",
-    "defaultCurrency": "CNY"
+    "reportingCurrency": "CNY"
   },
   "categories": [],
   "paymentMethods": [],
@@ -47,7 +47,7 @@ The archive format must:
 }
 ```
 
-Required top-level properties are fixed for schema version 1. Unknown top-level properties produce warnings but do not fail import unless they conflict with a defined field.
+Required top-level properties are fixed for schema version 2. Unknown top-level properties produce warnings but do not fail import unless they conflict with a defined field.
 
 ## 4. Exported Profile
 
@@ -55,7 +55,7 @@ Required top-level properties are fixed for schema version 1. Unknown top-level 
 type ExportProfile = {
   displayName: string | null;
   timezone: string;
-  defaultCurrency: string;
+  reportingCurrency: string;
 };
 ```
 
@@ -76,6 +76,7 @@ Profile settings are imported only when the user explicitly selects that option 
   "id": "c5854b7b-6279-4d18-b725-3c2fcf314962",
   "name": "Development Tools",
   "color": "#6366F1",
+  "symbol": { "type": "icon", "value": "device" },
   "position": 0,
   "createdAt": "2026-08-01T08:00:00.000Z",
   "updatedAt": "2026-08-10T09:30:00.000Z"
@@ -92,6 +93,7 @@ Profile settings are imported only when the user explicitly selects that option 
   "name": "Visa",
   "kind": "card",
   "label": "•••• 1234",
+  "symbol": { "type": "icon", "value": "brand_visa" },
   "position": 0,
   "createdAt": "2026-08-01T08:00:00.000Z",
   "updatedAt": "2026-08-10T09:30:00.000Z"
@@ -119,6 +121,7 @@ The format supports only safe display labels. It must never contain a complete c
   "archivedAt": null,
   "categoryId": "c5854b7b-6279-4d18-b725-3c2fcf314962",
   "paymentMethodId": "43114e63-e950-4466-a905-6bd6fb8a356f",
+  "symbol": { "type": "emoji", "value": "✨" },
   "websiteUrl": "https://example.com",
   "notes": null,
   "createdAt": "2026-08-01T08:00:00.000Z",
@@ -131,9 +134,11 @@ The archive intentionally omits `nextBillingOn` because it is derived and may be
 ## 8. Complete Type Definition
 
 ```ts
-type OpenSubListsArchiveV1 = {
+type ResourceSymbol = { type: "icon"; value: string } | { type: "emoji"; value: string } | null;
+
+type OpenSubListsArchiveV2 = {
   format: "opensublists";
-  schemaVersion: 1;
+  schemaVersion: 2;
   archiveId: string;
   exportedAt: string;
   generator: {
@@ -143,12 +148,13 @@ type OpenSubListsArchiveV1 = {
   profile: {
     displayName: string | null;
     timezone: string;
-    defaultCurrency: string;
+    reportingCurrency: string;
   };
   categories: Array<{
     id: string;
     name: string;
     color: string;
+    symbol: ResourceSymbol;
     position: number;
     createdAt: string;
     updatedAt: string;
@@ -158,6 +164,7 @@ type OpenSubListsArchiveV1 = {
     name: string;
     kind: "card" | "wallet" | "bank" | "store" | "other";
     label: string | null;
+    symbol: ResourceSymbol;
     position: number;
     createdAt: string;
     updatedAt: string;
@@ -178,6 +185,7 @@ type OpenSubListsArchiveV1 = {
     archivedAt: string | null;
     categoryId: string | null;
     paymentMethodId: string | null;
+    symbol: ResourceSymbol;
     websiteUrl: string | null;
     notes: string | null;
     createdAt: string;
@@ -237,7 +245,7 @@ Validation errors include JSON-style paths but never echo complete sensitive rec
 {
   "archive": {
     "format": "opensublists",
-    "schemaVersion": 1
+    "schemaVersion": 2
   }
 }
 ```
@@ -248,7 +256,7 @@ The actual archive contains all required fields. Example response:
 {
   "data": {
     "digest": "sha256-6f5902ac...",
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "counts": {
       "categories": 4,
       "paymentMethods": 2,
@@ -339,35 +347,35 @@ The importer compiles validated changes into a bounded D1 batch transaction. Any
 
 If future limits exceed practical batch constraints, imports should move to a resumable job model with an explicit staging area. The MVP must not silently fall back to partial writes.
 
-## 15. Schema Evolution
+## 15. Current-only Schema Policy
 
-- `schemaVersion` is an integer.
-- Importers support known older versions through explicit pure transformations.
-- A newer unsupported version fails with `UNSUPPORTED_ARCHIVE_VERSION`.
-- Export always writes the current version.
-- A transformation must preserve warnings for fields that cannot be represented.
-- Database migration versions are unrelated to archive schema versions.
+- `schemaVersion` remains an integer and export always writes the current version.
+- The runtime imports only the current archive version. Older and newer versions fail with `UNSUPPORTED_ARCHIVE_VERSION`.
+- The personal deployment does not carry historical archive transformers indefinitely.
+- An approved breaking refactor preserves the raw archive and D1 backup, runs one deterministic offline transformation, produces a review and verification report, and imports the transformed current archive.
+- The one-time transformer is an operator cutover tool rather than an application compatibility layer.
+- Database migration versions remain unrelated to archive schema versions.
 
 ## 16. Native SubList Adapter
 
-Migration from the native SubList application is an adapter into the OpenSubLists V1 intermediate archive, not a special database writer.
+Migration from the native SubList application is an adapter into the current OpenSubLists archive, not a special database writer.
 
 Expected mappings based on the current SubList application model:
 
-| Native concept               | OpenSubLists V1                           |
-| ---------------------------- | ----------------------------------------- |
-| Subscription                 | Subscription                              |
-| Category                     | Category                                  |
-| Payment method               | Payment method                            |
-| Billing amount and currency  | `amount` and `currency`                   |
-| Billing interval and unit    | `recurrence`                              |
-| Website and notes            | Same fields                               |
-| Archived state               | `archivedAt` when representable           |
-| Pause history                | Warning; not imported in V1               |
-| Price history                | Warning; current amount only              |
-| Trial or introductory offer  | Warning; base recurring subscription only |
-| Custom icons and backgrounds | Warning; not imported                     |
-| Native reminder settings     | Warning; reminder rules are outside V1    |
+| Native concept               | Current OpenSubLists archive                                       |
+| ---------------------------- | ------------------------------------------------------------------ |
+| Subscription                 | Subscription                                                       |
+| Category                     | Category                                                           |
+| Payment method               | Payment method                                                     |
+| Billing amount and currency  | `amount` and `currency`                                            |
+| Billing interval and unit    | `recurrence`                                                       |
+| Website and notes            | Same fields                                                        |
+| Archived state               | `archivedAt` when representable                                    |
+| Pause history                | Warning; not imported                                              |
+| Price history                | Warning; current amount only                                       |
+| Trial or introductory offer  | Warning; base recurring subscription only                          |
+| Custom icons and backgrounds | Map one supported symbol when exact; otherwise warn and use `null` |
+| Native reminder settings     | Warning; reminder rules are outside scope                          |
 
 Implementation requires a redacted real export fixture. Field mappings must not be guessed from the native database when a supported JSON export is available.
 
@@ -386,11 +394,13 @@ Implementation requires a redacted real export fixture. Field mappings must not 
 
 - Round trip export → preview → import into an empty user.
 - Preserve category and payment method relationships.
+- Round-trip category, payment-method, and subscription symbols.
+- Reject unknown icon tokens, text or multiple-emoji values, markup, image URLs, and uploads.
 - Recalculate `nextBillingOn` rather than importing it.
 - Reject duplicate resource IDs inside an archive.
 - Reject broken relationship IDs.
 - Reject invalid decimal values and dates.
-- Reject a newer schema version.
+- Reject any archive version other than the current version.
 - Apply every conflict strategy deterministically.
 - Roll back all changes when one write fails.
 - Reject digest mismatch.

@@ -1,6 +1,6 @@
 # OpenSubLists MVP UI Flow
 
-> Status: MVP information architecture and interaction plan  
+> Status: Implemented baseline with approved refactor target
 > Last updated: 2026-08-23  
 > Targets: Narrow and wide web-browser viewports
 
@@ -64,11 +64,12 @@ Navigation state is URL-driven so browser Back and Forward behavior remains pred
 On the first login:
 
 1. Resolve the browser's IANA time zone and preferred locale.
-2. Suggest a default currency based on explicit user choice, not silent geolocation.
-3. Ask the user to confirm time zone and default currency.
-4. Show an empty dashboard with one primary action: Add your first subscription.
+2. Suggest a reporting currency based on explicit user choice, not silent geolocation.
+3. Ask the user to confirm time zone and reporting currency.
+4. Offer a reviewed recommended-category checklist, individual category templates, Start Empty, and Create Custom Category.
+5. Show an empty dashboard with one primary action: Add your first subscription.
 
-The user may skip display-name entry. The application does not block first use on category or payment method setup.
+The user may skip display-name entry and all category choices. Recommended categories are created only after explicit confirmation and become ordinary editable rows. Payment methods are never bulk-created during onboarding.
 
 ## 6. Dashboard
 
@@ -76,15 +77,30 @@ The user may skip display-name entry. The application does not block first use o
 
 1. Next charge.
 2. Charges due in the next 30 days.
-3. Monthly and annualized estimates by currency.
-4. Category breakdown.
-5. Recent or newly added subscriptions when useful.
+3. Combined reporting-currency estimates for monthly average, annualized cost, current-month charges, and current-year charges.
+4. Exact original-currency summaries and FX source/date state.
+5. Category and payment-method breakdowns.
+6. Recent or newly added subscriptions when useful.
 
 At wide browser widths, the upcoming-charge agenda is the dominant content area. Summary information supports the agenda rather than competing with it as a dense analytics dashboard.
 
 ## 6.2 Multiple Currencies
 
-Each currency receives a separate summary row or card:
+The first summary row combines every convertible active, unarchived subscription into
+the user's reporting currency. Every amount is labeled as an estimate, and the row
+shows the ECB reference-rate date plus a stale or unavailable warning when required.
+
+The four combined values are:
+
+- Monthly average.
+- Annualized cost.
+- Current local calendar-month charges projected from current subscription definitions.
+- Current local calendar-year charges projected from current subscription definitions.
+
+Current-month and current-year values are not observed historical payments. Editing a
+current subscription may change the estimate for the complete current period.
+
+Each original currency also retains a separate summary row or card:
 
 ```text
 CNY  ¥128.00 monthly estimate
@@ -92,9 +108,9 @@ USD  $19.98 monthly estimate
 JPY  ¥1,200 monthly estimate
 ```
 
-The UI must not show one grand total until exchange-rate conversion is implemented and clearly labeled.
-
-Monthly estimates are the default wide-browser presentation. Annualized estimates remain available through a compact Monthly/Annual control or equivalent disclosure without changing the currency-separation rule.
+The UI shows a combined total only when every included currency can be converted with
+one complete snapshot. It never hides an unconvertible currency or substitutes `1:1`.
+Original-currency cards remain visible even when conversion is unavailable.
 
 ## 6.3 Upcoming Charges
 
@@ -102,6 +118,7 @@ Monthly estimates are the default wide-browser presentation. Annualized estimate
 - Optional quick filters: 7 days and 30 days.
 - Group entries by billing date.
 - Show name, amount, currency, category color, and billing date.
+- Show the subscription symbol with monogram fallback and the category symbol with color-dot fallback.
 - Selecting an entry opens subscription detail.
 - The next-charge summary is calculated independently of the selected upcoming window, so it can show the next active charge even when it falls outside a 7-day view.
 - Every occurrence inside the selected window is represented. A daily or weekly subscription may therefore appear more than once.
@@ -269,24 +286,42 @@ Reactivation previews the newly calculated next billing date before confirmation
 - Verified email, read-only.
 - Display name.
 - Time zone.
-- Default currency.
+- Reporting currency; it also prefills a new subscription and never rewrites existing amounts.
 - Sign out.
 
 Changing time zone warns that the definition of local today may change near midnight, then reconciles active subscriptions.
 
 ## 11.2 Categories
 
-- Ordered list with color, name, edit, and delete.
-- Add and edit use a compact form.
+- Ordered list with symbol, color, name, edit, and delete.
+- Empty and add states show recommended templates, the complete localized catalog, and Create Custom.
+- Selecting a template prefills localized name, color, and symbol; saved rows do not retain preset identity.
+- Add Recommended Categories reviews and atomically creates only missing ordinary rows.
+- Add and edit use the same compact form regardless of creation source.
 - Deleting a category explains that subscriptions remain and become uncategorized.
 
 ## 11.3 Payment Methods
 
-- Ordered list with kind, name, and safe label.
+- Ordered list with symbol, kind, name, and safe label.
+- Preset choices appear before the form. A selection only prefills name, kind, and symbol; the user must review and save it.
 - The form explicitly asks only for a display label, not payment credentials.
 - Deleting a method explains that subscriptions remain and lose the association.
 
-## 11.4 Data
+## 11.4 Symbol Picker
+
+Category, payment-method, and subscription forms reuse one picker with Common Icons,
+Emoji, and Clear actions. Common icons come from the application allow-list. Emoji may
+come from the curated picker or one pasted grapheme. Text, multiple emoji, arbitrary
+SVG, HTML, image URLs, remote favicons, and uploads are rejected.
+
+The picker is keyboard operable, shows visible selection and focus, and keeps the
+resource name visible beside decorative output. Rendering fallbacks are:
+
+- Category symbol, then color dot.
+- Payment symbol, then a generic icon derived from `kind`.
+- Subscription symbol, then generated monogram.
+
+## 11.5 Data
 
 - Export JSON.
 - Import JSON.
@@ -343,6 +378,8 @@ Use the same not-found presentation for absent resources and resources owned by 
 - Form controls have programmatic labels and error associations.
 - Status is not conveyed by color alone.
 - Category colors meet contrast requirements where used with text; otherwise pair them with labels.
+- Symbols never replace visible resource names and are not the only identifier.
+- Decorative icons and emoji use `aria-hidden` when adjacent text already supplies their meaning.
 - Touch targets are at least 44 by 44 CSS pixels where practical.
 - Dialogs manage focus and return it to the trigger.
 - Respect reduced-motion preferences.
@@ -364,7 +401,7 @@ Use the same not-found presentation for absent resources and resources owned by 
 - Category color is an accent, not the only identifier.
 - Monetary totals use tabular numerals.
 - Avoid decorative charts when a compact list communicates the same information more clearly.
-- No custom background images or uploaded icons in the MVP.
+- No background images, uploaded icons, arbitrary SVG, remote logos, or favicon fetching. Allow-listed bundled icons and one-emoji symbols are supported.
 
 ### 16.1 Selected Dashboard Prototype
 
@@ -374,12 +411,12 @@ This image is the selected visual reference for the authenticated wide-browser `
 
 - The same responsive web application shell, persistent navigation, typography, spacing, surface treatment, and Add Subscription action used by the selected Subscriptions prototype.
 - `Overview` as the visible localized English label for the Dashboard route.
-- A next-charge summary and a separate 30-day amount for each currency, with no combined cross-currency total.
+- Combined reporting-currency estimates with visible rate metadata, plus original-currency summaries.
 - A 30-day renewal agenda as the dominant content area, with a secondary 7-day view.
-- Separate monthly estimates by currency and a restrained category breakdown based on active subscription counts.
+- Original-currency details and restrained amount-based category and payment-method breakdowns.
 - A compact first viewport that favors lists and direct values over decorative charts.
 
-The image is directional rather than normative. Its product names, icons, amounts, dates, categories, and currency examples are mock content. The implementation must also expose annualized estimates through compact progressive disclosure, generate every recurrence occurrence inside the selected window, preserve the route and API rules in this document, and use system or monogram icons unless a separate MVP asset decision is approved. The image does not authorize uploaded service artwork.
+The image is directional rather than normative. Its product names, icons, amounts, dates, categories, and currency examples are mock content. The implementation must expose the approved four reporting-currency estimates, retain original-currency values, generate every recurrence occurrence inside the selected window, and preserve the route and API rules in this document. Resource symbols use the approved allow-listed icon or emoji model with documented fallbacks; the image does not authorize uploaded or remotely fetched service artwork.
 
 ### 16.2 Selected Subscriptions Prototype
 
@@ -389,12 +426,12 @@ This image is the selected visual reference for the authenticated wide-browser `
 
 - A responsive web application shell with persistent navigation and one prominent Add Subscription action.
 - Search, next-billing sorting, and grid/list display controls in the page header.
-- Separate monthly estimates for each currency with no combined cross-currency total.
+- Original-currency estimates plus a reporting-currency summary using one visible FX snapshot.
 - Status, category, payment-method, and currency filters above the result set.
 - A responsive subscription-card grid that exposes amount, currency, recurrence, category, payment method, next billing date, and lifecycle state without opening the record.
 - A visibly distinct cancelled state that remains in the normal unarchived collection when the active filters include it.
 
-The image is directional rather than normative. Product names, logos, amounts, dates, payment labels, filter selections, and pagination values are mock content. The route behavior, default filters, tenant isolation, localization, accessibility requirements, money rules, lifecycle semantics, and responsive behavior in this document remain authoritative. The implementation uses system or monogram icons unless a separate MVP asset decision is approved; the image does not authorize uploaded service artwork.
+The image is directional rather than normative. Product names, logos, amounts, dates, payment labels, filter selections, and pagination values are mock content. The route behavior, default filters, tenant isolation, localization, accessibility requirements, money rules, lifecycle semantics, symbol fallbacks, and responsive behavior in this document remain authoritative. The image does not authorize uploaded or remotely fetched service artwork.
 
 ## 17. Analytics and Privacy
 
@@ -448,6 +485,6 @@ Settings → Data → Select archive → Preview warnings → Choose strategy �
 - Email reminder configuration.
 - App Store or screenshot import.
 - Price history and pause timeline.
-- Exchange-rate controls.
+- Manual and historical exchange-rate controls.
 - PWA installation prompts.
-- Custom icons and images.
+- Uploaded images, arbitrary custom SVG assets, and remote logo or favicon fetching.

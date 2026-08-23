@@ -1,6 +1,6 @@
 # OpenSubLists API Contract
 
-> Status: MVP contract  
+> Status: Implemented baseline with approved refactor target
 > Last updated: 2026-08-23  
 > Base path: `/api/v1`  
 > Format: JSON over same-origin HTTPS
@@ -146,6 +146,17 @@ Timestamp:
 
 Optional properties may be omitted on create. Responses use explicit `null` for nullable stored fields. A PATCH property set to `null` clears the field; an omitted property is unchanged.
 
+### 6.5 Resource Symbols
+
+```ts
+type ResourceSymbol =
+  { type: "icon"; value: CommonIconKey } | { type: "emoji"; value: string } | null;
+```
+
+`CommonIconKey` is a shared allow-list. Emoji values contain exactly one validated
+extended grapheme. Arbitrary markup, image URLs, and component export names are
+rejected.
+
 ## 7. Resource Schemas
 
 ## 7.1 User
@@ -156,7 +167,7 @@ type User = {
   email: string;
   displayName: string | null;
   timezone: string;
-  defaultCurrency: string;
+  reportingCurrency: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -171,6 +182,7 @@ type Category = {
   id: string;
   name: string;
   color: string;
+  symbol: ResourceSymbol;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -187,6 +199,7 @@ type PaymentMethod = {
   name: string;
   kind: "card" | "wallet" | "bank" | "store" | "other";
   label: string | null;
+  symbol: ResourceSymbol;
   position: number;
   createdAt: string;
   updatedAt: string;
@@ -221,6 +234,7 @@ type Subscription = {
   archivedAt: string | null;
   categoryId: string | null;
   paymentMethodId: string | null;
+  symbol: ResourceSymbol;
   websiteUrl: string | null;
   notes: string | null;
   createdAt: string;
@@ -242,13 +256,13 @@ Request:
 
 ```json
 {
-  "displayName": "Arnold",
+  "displayName": "Example User",
   "timezone": "Asia/Shanghai",
-  "defaultCurrency": "CNY"
+  "reportingCurrency": "CNY"
 }
 ```
 
-All fields are optional. Changing the time zone triggers next-billing reconciliation for active subscriptions.
+All fields are optional. Changing the time zone triggers next-billing reconciliation for active subscriptions. Changing reporting currency never rewrites an existing subscription amount or currency.
 
 ## 9. Category Endpoints
 
@@ -262,6 +276,7 @@ Returns categories ordered by `position`, then name.
 {
   "name": "Development Tools",
   "color": "#6366F1",
+  "symbol": { "type": "icon", "value": "device" },
   "position": 0
 }
 ```
@@ -270,7 +285,13 @@ Returns `201 Created` with the category.
 
 ### `PATCH /api/v1/categories/:id`
 
-Accepts any subset of `name`, `color`, and `position`.
+Accepts any subset of `name`, `color`, `symbol`, and `position`.
+
+### `POST /api/v1/categories/batch`
+
+Accepts a bounded array of ordinary category create inputs after the client has
+localized and reviewed preset selections. The server does not accept preset keys and
+does not persist preset provenance. The batch is atomic and returns the created rows.
 
 ### `DELETE /api/v1/categories/:id`
 
@@ -289,6 +310,7 @@ Returns payment methods ordered by `position`, then name.
   "name": "Visa",
   "kind": "card",
   "label": "•••• 1234",
+  "symbol": { "type": "icon", "value": "brand_visa" },
   "position": 0
 }
 ```
@@ -297,7 +319,7 @@ Returns `201 Created` with the payment method.
 
 ### `PATCH /api/v1/payment-methods/:id`
 
-Accepts any subset of `name`, `kind`, `label`, and `position`.
+Accepts any subset of `name`, `kind`, `label`, `symbol`, and `position`.
 
 ### `DELETE /api/v1/payment-methods/:id`
 
@@ -337,6 +359,7 @@ The server reconciles stale next-billing values before producing the final respo
   },
   "categoryId": null,
   "paymentMethodId": null,
+  "symbol": { "type": "emoji", "value": "✨" },
   "websiteUrl": "https://example.com",
   "notes": null
 }
@@ -357,6 +380,7 @@ Accepts an editable subset of:
 - `currency`
 - `categoryId`
 - `paymentMethodId`
+- `symbol`
 - `websiteUrl`
 - `notes`
 - `recurrence`
@@ -402,41 +426,83 @@ type UpcomingCharge = {
   amount: string;
   currency: string;
   billingOn: string;
+  symbol: ResourceSymbol;
   category: {
     id: string;
     name: string;
     color: string;
+    symbol: ResourceSymbol;
   } | null;
+};
+
+type ReportingEstimate = {
+  amount: string;
+  currency: string;
+};
+
+type FxStatus = {
+  state: "not_needed" | "fresh" | "stale" | "unavailable";
+  provider: "ecb" | null;
+  rateDate: string | null;
+  fetchedAt: string | null;
+  missingCurrencies: string[];
 };
 
 type Dashboard = {
   localToday: string;
   upcomingThrough: string;
   nextCharge: UpcomingCharge | null;
+  reporting: {
+    currency: string;
+    monthlyAverage: ReportingEstimate | null;
+    annualized: ReportingEstimate | null;
+    currentMonthCharges: ReportingEstimate | null;
+    currentYearCharges: ReportingEstimate | null;
+    fx: FxStatus;
+  };
   totalsByCurrency: Array<{
     currency: string;
     monthlyEstimate: string;
     annualizedEstimate: string;
     upcomingAmount: string;
+    currentMonthCharges: string;
+    currentYearCharges: string;
   }>;
   upcoming: UpcomingCharge[];
   categoryBreakdown: Array<{
     categoryId: string | null;
     categoryName: string | null;
     categoryColor: string | null;
+    categorySymbol: ResourceSymbol;
     subscriptionCount: number;
+    reportingMonthlyAverage: string | null;
+    reportingAnnualized: string | null;
     totalsByCurrency: Array<{
       currency: string;
       monthlyEstimate: string;
       annualizedEstimate: string;
     }>;
   }>;
+  paymentMethodBreakdown: Array<{
+    paymentMethodId: string | null;
+    paymentMethodName: string | null;
+    paymentMethodSymbol: ResourceSymbol;
+    subscriptionCount: number;
+    reportingMonthlyAverage: string | null;
+    reportingAnnualized: string | null;
+  }>;
 };
 ```
 
-`nextCharge` is the earliest active, unarchived occurrence on or after `localToday` and is independent of `upcomingDays`. `upcoming` contains every occurrence in the inclusive window from `localToday` through `upcomingThrough`; a subscription may appear multiple times when its recurrence repeats inside the window. Category counts and estimates include all active, unarchived subscriptions, not only subscriptions with an occurrence inside the selected window.
+`nextCharge` is the earliest active, unarchived occurrence on or after `localToday` and is independent of `upcomingDays`. `upcoming` contains every occurrence in the inclusive window from `localToday` through `upcomingThrough`; a subscription may appear multiple times when its recurrence repeats inside the window. Category and payment-method estimates include all active, unarchived subscriptions, not only subscriptions with an occurrence inside the selected window.
 
-Different currencies remain separate. Estimates are rounded only at the response boundary.
+`totalsByCurrency` preserves exact original-currency groups. `reporting` combines all
+eligible values through one ECB snapshot, except that a source amount already in the
+reporting currency uses the exact identity conversion and requires no provider. Its current-month and current-year values
+replay current subscription definitions across the complete local calendar period and
+are estimates, not observed historical payments. If any included currency cannot be
+converted, every combined estimate is `null` and `fx.missingCurrencies` explains why.
+Estimates are rounded only at the response boundary.
 
 ## 13. Import and Export Endpoints
 
@@ -512,7 +578,11 @@ Required integration tests cover:
 - API cache headers.
 - Same-origin protection on unsafe methods.
 - Error envelope consistency.
-- Dashboard currency separation.
+- Dashboard original-currency preservation and complete reporting-currency conversion.
+- Dashboard fresh, stale, missing-rate, and provider-failure behavior.
+- Complete current-month and current-year projections using current subscription definitions.
 - Dashboard occurrence expansion for daily and weekly subscriptions.
 - Dashboard next-charge behavior when the occurrence is outside the requested upcoming window.
 - Dashboard category counts excluding cancelled and archived subscriptions.
+- Category batch-create atomicity and normalized-name conflicts.
+- Icon-token allow-list and single-grapheme emoji validation on every symbol-bearing resource.

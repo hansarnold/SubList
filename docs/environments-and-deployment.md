@@ -1,6 +1,6 @@
 # OpenSubLists Environments and Deployment
 
-> Status: MVP operations plan  
+> Status: Implemented operations baseline with approved refactor cutover
 > Last updated: 2026-08-23  
 > Deployment platform: Cloudflare
 
@@ -16,22 +16,24 @@ The project uses three isolated environments.
 
 Preview and production never share a D1 database, Access application audience, route, or secrets.
 
-### 1.1 Current Maintainer Production Target
+### 1.1 Operator-owned Hosted Targets
 
-| Resource           | Production value                   |
-| ------------------ | ---------------------------------- |
-| Public origin      | `https://sublist.hansarnold.uk`    |
-| Worker             | `open-sublists-production`         |
-| D1 database        | `open-sublists-production`         |
-| Access team domain | `hansarnold.cloudflareaccess.com`  |
-| Login method       | Access one-time PIN with allowlist |
+The repository does not record a maintainer's active hostname, D1 UUID, Access team
+domain, or Access application audience. `wrangler.example.jsonc` documents the
+required shape with fail-closed example values. Each operator copies it to the
+ignored `wrangler.local.jsonc` file and supplies resources from their own Cloudflare
+account.
 
-The allowlisted email addresses live only in Cloudflare Access. They are operational
-authorization data and are not stored in Git.
+Allowlisted email addresses live only in Cloudflare Access. They are operational
+authorization data and are never stored in Git.
 
 ## 2. Wrangler Configuration
 
-Use one `wrangler.jsonc` with explicit environment sections. Bindings retain the same logical names while pointing to different resources.
+The tracked `wrangler.example.jsonc` contains explicit local, preview, and production
+sections. Hosted migration and deployment scripts load the ignored
+`wrangler.local.jsonc`; local development, tests, generated types, and CI load the
+tracked example. Bindings retain the same logical names while pointing to different
+resources.
 
 Required bindings and variables:
 
@@ -156,12 +158,20 @@ Prefer expand-and-contract changes:
 4. Switch reads to the new shape.
 5. Remove obsolete columns in a later migration.
 
+The maintainer-only reporting and symbols cutover is an explicit exception. It uses a
+short write freeze, immutable JSON and D1 backups, an offline deterministic transform,
+a fresh target D1 database, and a coordinated Worker binding switch. The previous
+Worker and previous database remain paired for rollback; old and new application
+schemas do not require dual-read interoperability. Full procedure and verification
+gates are defined in [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md).
+
 ## 7. Seed Data
 
 - Seed scripts run only in local development.
 - Fixtures use clearly fictional users, subscriptions, and payment labels.
 - Preview test data is created through normal APIs where possible.
 - Production has no automatic seed beyond first-login user provisioning.
+- Preset catalogs are bundled localized templates, not seed rows. Production categories and payment methods are created only after explicit user action or the reviewed maintainer cutover.
 
 ## 8. CI Quality Gates
 
@@ -217,6 +227,8 @@ Preview and production smoke tests verify:
 - API responses include `Cache-Control: private, no-store`.
 - Hashed static assets return long-lived cache headers.
 - The Worker cannot be reached through an unprotected alternate route.
+- The FX snapshot has the expected ECB source, reference date, and complete coverage for every active subscription currency.
+- Reporting-currency estimates and original-currency totals pass a reviewed fixture calculation.
 
 Production smoke tests must avoid creating realistic sensitive data. Any created test record is removed immediately.
 
@@ -244,6 +256,7 @@ Initial operational alerts may be manual dashboard checks. Add automated alertin
 - D1 Time Travel is the platform-level recovery mechanism.
 - User-level JSON export is the portability and self-service backup mechanism.
 - Before a risky production migration, confirm the available D1 recovery point or bookmark.
+- Before the maintainer cutover, preserve the raw archive, D1 SQL backup, transformed archive, hashes, and verification report as separate artifacts.
 - Recovery exercises should be tested against preview before relying on them for production.
 - Application code must tolerate a rollback to the previous Worker version when the schema remains in an expanded compatible state.
 
@@ -263,53 +276,60 @@ Stop writes, assess the affected interval, and use D1 recovery tooling. Do not a
 
 Database migrations are normally forward-fixed rather than reversed.
 
+### Maintainer Refactor Cutover Failure
+
+Restore the previous Worker deployment and its previous D1 binding together. Do not
+point old code at the new schema or new code at the old schema. Keep both databases
+until the maintainer explicitly accepts the cutover.
+
 ## 14. Secrets and Permissions
 
 - Store secrets only with Cloudflare secret bindings.
 - Keep preview and production secrets separate.
 - Use the narrowest practical Cloudflare API token permissions in CI.
-- Database IDs, Access audience values, team domains, and public hostnames are not credentials. A maintainer deployment may commit this metadata so builds and migrations are reproducible; forks must replace it with their own resources.
+- Database IDs, Access audience values, team domains, and public hostnames are not credentials, but they are operator-owned deployment metadata and do not belong in this repository. Keep them in ignored `wrangler.local.jsonc` and back that file up privately.
 - Never commit account API tokens, Access JWTs, session cookies, approved email addresses, or other authorization credentials.
 - Never place JWTs or API tokens in URLs.
 
 ## 15. Scheduled Work
 
-The MVP does not require a Cron Trigger. Upcoming charges are calculated during reads.
+The existing full-stack Worker owns a daily ECB rate-refresh `scheduled()` handler.
+Production configures `15 18 * * *`; Cloudflare Cron expressions run in UTC.
 
-When reminders or exchange-rate refreshes are approved:
-
-- Add a `scheduled()` handler to the existing Worker first.
-- Cron expressions run in UTC.
-- Convert reminder delivery intent from the user's time zone to an execution window.
-- Make all jobs idempotent.
+- Validate a complete provider response before atomically replacing the singleton D1 snapshot.
+- Preserve the last known-good snapshot on network, parsing, validation, or write failure.
+- Make provider/date refresh idempotent.
+- Test the scheduled handler through the Cloudflare Vite local scheduled route.
 - Split background work only if execution or permission boundaries justify it.
+- Any later reminder job must convert user-local intent into a UTC execution window.
 
 ## 16. Production Readiness Checklist
 
-- [x] Production D1 created and bound only to production.
+This is an operator checklist rather than a record of any specific deployment.
+
+- [ ] Production D1 created and bound only to production.
 - [ ] Preview D1 created and isolated.
-- [x] All production migrations pass fresh and upgrade-path tests and are applied remotely.
-- [x] Access OTP and initial allowlist configured.
-- [x] Session durations configured to 30 days global and 7 days application/policy.
-- [x] Access JWT issuer and audience validation configured.
+- [x] All migrations pass fresh and upgrade-path tests locally.
+- [ ] All production migrations applied remotely.
+- [ ] Access OTP and initial allowlist configured.
+- [ ] Session durations configured to 30 days global and 7 days application/policy.
+- [ ] Access JWT issuer and audience values configured in `wrangler.local.jsonc`.
 - [x] Unprotected `workers.dev` and version preview routes disabled in configuration.
 - [x] Same-origin checks enabled on unsafe API methods.
 - [ ] API cache policy verified.
 - [ ] Logging redaction verified.
 - [ ] JSON export tested.
 - [ ] D1 recovery process reviewed.
+- [ ] Daily Cron Trigger deployed and visible in Worker configuration.
+- [ ] Initial ECB snapshot populated and complete for active currencies.
+- [ ] Reporting estimates verified against an independent fixture.
 - [ ] Preview smoke tests passed.
 
-### 16.1 Initial Production Release Record
+### 16.1 Operator Release Records
 
-On 2026-08-23:
-
-- D1 migrations `0001_initial.sql` through `0003_reduce_subscription_limit.sql` were applied successfully.
-- Worker version `f07dad0c-6126-42e8-86df-1a9a9ff1e283` was deployed to `sublist.hansarnold.uk`.
-- Anonymous requests to `/`, `/health`, and `/api/v1/session` were redirected to the correct Access application.
-- Both the `workers.dev` route and version preview URLs were verified disabled.
-- An authenticated OTP login succeeded, the Worker accepted the verified Access JWT, and the first production user was provisioned.
-- The hosted subscription create, edit, archive, and unarchive smoke test remains pending.
+An operator may keep Worker version IDs, D1 recovery bookmarks, smoke-test results,
+and incident notes in a private operations system. Do not add active resource IDs,
+approved identities, or user data to this public repository.
 
 ## 17. Official References
 
@@ -318,4 +338,6 @@ On 2026-08-23:
 - [Cloudflare Access session management](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)
 - [Validating Access JWTs](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/)
 - [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)
+- [Cloudflare Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+- [ECB Data API](https://data.ecb.europa.eu/help/api/data)
 - [Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
