@@ -1,12 +1,12 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: Local MVP implemented; hosted deployment pending
+> Status: First private Cloudflare production deployment online
 >
 > Last updated: 2026-08-23
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 1 complete; preparing the first private Cloudflare deployment
+> Current phase: Phase 2 in progress; authenticated production smoke test pending
 
 ## 1. Project Overview
 
@@ -241,8 +241,12 @@ Completion criterion: The maintainer can manage all subscriptions locally.
 
 ### Phase 2: Private Cloudflare Deployment — In Progress
 
-- [ ] Create and deploy the preview and production D1 databases and Worker environments.
-- [ ] Configure Access OTP, the email allowlist, and real audience values.
+- [x] Create the production D1 database and configure the production Worker, hostname, and binding metadata.
+- [x] Configure Access OTP, the initial email allowlist, and the real production audience.
+- [x] Apply production migrations and deploy the Worker to `sublist.hansarnold.uk`.
+- [x] Verify unauthenticated Access redirects and the absence of alternate Worker entry points.
+- [ ] Complete the authenticated OTP, JWT validation, and first-user provisioning smoke test.
+- [ ] Add isolated preview D1, hostname, and Access resources before regular preview releases begin.
 - [x] Prevent public entry points and accidental local-auth configuration from bypassing Access.
 - [x] Add structured logging, stable error handling, and backup documentation.
 - [x] Complete portable JSON import and export.
@@ -303,6 +307,8 @@ The following do not block the first hosted deployment:
 - D1 is the primary database.
 - Initial access is invite-only with no public registration.
 - Cloudflare Access OTP is the preferred identity solution.
+- Hosted users authenticate with email PINs; the application does not store passwords.
+- The maintainer production hostname is `sublist.hansarnold.uk`.
 - TypeScript is the application language; D1 schema and queries use explicit SQL.
 - The MVP uses React, Vite, Hono, Zod, Vitest, Wrangler, and pnpm without an ORM.
 - The initial scaffold targets Node.js 24 LTS; exact dependency and package-manager versions are pinned in repository metadata.

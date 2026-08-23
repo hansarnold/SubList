@@ -3,11 +3,12 @@
   "name": "open-sublists",
   "main": "./src/worker/index.ts",
   "workers_dev": false,
+  "preview_urls": false,
   "compatibility_date": "2026-08-23",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*", "/health"],
   },
   "observability": {
     "enabled": true,
@@ -33,6 +34,7 @@
     "preview": {
       "name": "open-sublists-preview",
       "workers_dev": false,
+      "preview_urls": false,
       "vars": {
         "ENVIRONMENT": "preview",
         "PUBLIC_ORIGIN": "https://preview.example.invalid",
@@ -50,16 +52,24 @@
     "production": {
       "name": "open-sublists-production",
       "workers_dev": false,
+      "preview_urls": false,
+      "routes": [
+        {
+          "pattern": "sublist.hansarnold.uk",
+          "custom_domain": true,
+        },
+      ],
       "vars": {
         "ENVIRONMENT": "production",
-        "PUBLIC_ORIGIN": "https://subscriptions.example.invalid",
-        "TEAM_DOMAIN": "example.cloudflareaccess.com",
-        "POLICY_AUD": "replace-with-production-access-audience",
+        "PUBLIC_ORIGIN": "https://sublist.hansarnold.uk",
+        "TEAM_DOMAIN": "hansarnold.cloudflareaccess.com",
+        "POLICY_AUD": "09cc8fed4ff0249fa0b727a2361127dc8332c6734caa94c4f822fcd7a8f54e7a",
       },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "open-sublists-production",
+          "database_id": "6aefdf6a-f0cf-4c55-a252-b14d69c6a808",
           "migrations_dir": "migrations",
         },
       ],

@@ -1,6 +1,6 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: Local MVP implementation complete; hosted deployment pending
+> Status: First hosted production deployment online; authenticated smoke test pending
 > Last updated: 2026-08-23
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
@@ -145,17 +145,19 @@ The local scaffold and implementation are complete:
 - [x] Add the CI workflow for install, formatting, linting, type checking, tests, and bundle validation.
 - [x] Implement and test the responsive website, API, authentication boundary, billing rules, and data portability flows.
 
-Cloudflare account IDs, D1 database IDs, Access audience values, and production hostnames are not required for local scaffolding. They become required before the first preview deployment.
+Cloudflare account IDs, D1 database IDs, Access audience values, and production hostnames are not required for local scaffolding. The production values are now configured; preview remains intentionally unprovisioned.
 
 ## 11. Inputs Required Before Hosted Deployment
 
 These inputs do not block local use:
 
 - Obtain a redacted native SubList export before implementing its adapter.
-- Supply the real preview and production origins, Access team domain, and audience values.
-- Create or bind isolated preview and production D1 databases.
-- Configure Access OTP policies and approved email addresses before exposing either hostname.
+- [x] Supply the real production origin, Access team domain, and audience value.
+- [x] Create and bind the isolated production D1 database.
+- [x] Configure the production Access OTP application and initial approved email policy.
+- [x] Apply production migrations and deploy the production Worker and custom hostname.
+- [ ] Provision equivalent isolated preview resources before enabling preview releases.
 
 ## 12. Next Delivery Step
 
-Create the preview Cloudflare resources, replace the non-functional placeholders, apply both remote migrations, deploy the preview Worker, and complete the documented Access and tenant-isolation smoke tests.
+Complete the first authenticated OTP login and hosted create/edit/archive smoke test. Provision preview resources before the next release cycle.

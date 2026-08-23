@@ -44,3 +44,6 @@ jobs:
 
       - name: Build and validate Worker bundle
         run: pnpm deploy:dry-run
+
+      - name: Build and validate production Worker bundle
+        run: pnpm deploy:dry-run:production

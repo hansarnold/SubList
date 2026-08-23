@@ -26,6 +26,7 @@
     "build:preview": "tsc -b && CLOUDFLARE_ENV=preview vite build",
     "build:production": "tsc -b && CLOUDFLARE_ENV=production vite build",
     "deploy:dry-run": "pnpm build && wrangler deploy --dry-run",
+    "deploy:dry-run:production": "pnpm build:production && wrangler deploy --dry-run --env production",
     "deploy:preview": "pnpm build:preview && wrangler deploy",
     "deploy:production": "pnpm build:production && wrangler deploy",
     "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build"

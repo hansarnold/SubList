@@ -47,14 +47,30 @@ Local requests use the fixed identity `developer@localhost.invalid`. Arbitrary u
 
 ## Cloudflare Deployment
 
-The committed `wrangler.jsonc` contains safe local values and non-functional preview/production placeholders. Before the first hosted deployment:
+The maintainer deployment is live at
+[sublist.hansarnold.uk](https://sublist.hansarnold.uk/). It uses the
+`open-sublists-production` Worker, an isolated production D1 database, and a
+hostname-scoped Cloudflare Access application.
 
-1. Replace the preview or production origin, Access team domain, and Access audience.
-2. Configure a custom hostname protected by Cloudflare Access OTP and an email allowlist.
-3. Keep preview and production D1 bindings separate.
-4. Apply remote migrations before releasing code that depends on them.
+Cloudflare Access uses one-time email PINs, so OpenSubLists does not store passwords.
+Approved emails are managed in the Access policy and are never committed to this
+repository.
 
-Wrangler can provision a missing D1 binding when deploying, or an existing database ID can be added by the operator. Production disables its alternate `workers.dev` route to prevent bypassing Access.
+After Wrangler is authenticated, the initial production release is:
+
+```sh
+pnpm db:migrate:production
+pnpm deploy:production
+```
+
+Production disables both `workers.dev` and version preview URLs to prevent an
+unprotected alternate entry point. The committed database ID, Access audience, and
+team domain are deployment metadata rather than credentials; forks should replace
+them with their own resources. API tokens, JWTs, and approved email addresses must
+never be committed.
+
+The preview environment remains a fail-closed template until separate preview D1,
+hostname, and Access resources are provisioned.
 
 See [Environments and Deployment](./docs/environments-and-deployment.md) for the complete release and recovery procedure.
 

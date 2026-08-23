@@ -16,6 +16,19 @@ The project uses three isolated environments.
 
 Preview and production never share a D1 database, Access application audience, route, or secrets.
 
+### 1.1 Current Maintainer Production Target
+
+| Resource           | Production value                   |
+| ------------------ | ---------------------------------- |
+| Public origin      | `https://sublist.hansarnold.uk`    |
+| Worker             | `open-sublists-production`         |
+| D1 database        | `open-sublists-production`         |
+| Access team domain | `hansarnold.cloudflareaccess.com`  |
+| Login method       | Access one-time PIN with allowlist |
+
+The allowlisted email addresses live only in Cloudflare Access. They are operational
+authorization data and are not stored in Git.
+
 ## 2. Wrangler Configuration
 
 Use one `wrangler.jsonc` with explicit environment sections. Bindings retain the same logical names while pointing to different resources.
@@ -78,6 +91,15 @@ Required settings:
 - Application or policy session duration: 7 days.
 - Separate audience tag for preview and production.
 - Production hostname covered by Access before user traffic is enabled.
+
+Hosted users do not have OpenSubLists passwords. Cloudflare sends a single-use PIN
+only to an email address that matches the Access allowlist. To invite or remove a
+friend, update the Access policy; no application database or password reset is
+required.
+
+`TEAM_DOMAIN` is the bare hostname returned by Cloudflare, without `https://`. The
+Worker constructs the issuer URL and JWKS URL from that hostname. `POLICY_AUD` is the
+exact audience returned by the hostname's Access application.
 
 The Worker still validates `Cf-Access-Jwt-Assertion` even though Access is placed in front of it.
 
@@ -179,6 +201,10 @@ Production smoke test
 
 Automatic production deployment is deferred until the release process is stable.
 
+The first maintainer-only release may deploy directly to the already protected
+production hostname after all local gates pass. Before subsequent feature releases,
+provision the isolated preview environment and resume the normal preview-first flow.
+
 ## 10. Release Smoke Tests
 
 Preview and production smoke tests verify:
@@ -242,7 +268,8 @@ Database migrations are normally forward-fixed rather than reversed.
 - Store secrets only with Cloudflare secret bindings.
 - Keep preview and production secrets separate.
 - Use the narrowest practical Cloudflare API token permissions in CI.
-- Do not commit account IDs, database IDs, audience values, or team domains if the repository is intended to be reusable without exposing deployment metadata; provide an example configuration instead.
+- Database IDs, Access audience values, team domains, and public hostnames are not credentials. A maintainer deployment may commit this metadata so builds and migrations are reproducible; forks must replace it with their own resources.
+- Never commit account API tokens, Access JWTs, session cookies, approved email addresses, or other authorization credentials.
 - Never place JWTs or API tokens in URLs.
 
 ## 15. Scheduled Work
@@ -259,19 +286,29 @@ When reminders or exchange-rate refreshes are approved:
 
 ## 16. Production Readiness Checklist
 
-- [ ] Production D1 created and bound only to production.
+- [x] Production D1 created and bound only to production.
 - [ ] Preview D1 created and isolated.
-- [ ] All migrations pass fresh and upgrade-path tests.
-- [ ] Access OTP and allowlist configured.
-- [ ] Session durations configured to 30 days global and 7 days application/policy.
-- [ ] Access JWT issuer and audience validation enabled.
-- [ ] Unprotected alternate Worker routes disabled.
-- [ ] Same-origin checks enabled on unsafe API methods.
+- [x] All production migrations pass fresh and upgrade-path tests and are applied remotely.
+- [x] Access OTP and initial allowlist configured.
+- [x] Session durations configured to 30 days global and 7 days application/policy.
+- [x] Access JWT issuer and audience validation configured.
+- [x] Unprotected `workers.dev` and version preview routes disabled in configuration.
+- [x] Same-origin checks enabled on unsafe API methods.
 - [ ] API cache policy verified.
 - [ ] Logging redaction verified.
 - [ ] JSON export tested.
 - [ ] D1 recovery process reviewed.
 - [ ] Preview smoke tests passed.
+
+### 16.1 Initial Production Release Record
+
+On 2026-08-23:
+
+- D1 migrations `0001_initial.sql` through `0003_reduce_subscription_limit.sql` were applied successfully.
+- Worker version `f07dad0c-6126-42e8-86df-1a9a9ff1e283` was deployed to `sublist.hansarnold.uk`.
+- Anonymous requests to `/`, `/health`, and `/api/v1/session` were redirected to the correct Access application.
+- Both the `workers.dev` route and version preview URLs were verified disabled.
+- The authenticated OTP, Worker JWT, and first-user provisioning smoke test remains pending.
 
 ## 17. Official References
 

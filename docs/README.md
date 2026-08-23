@@ -36,8 +36,8 @@ Agent-facing planning, implementation notes, architecture documents, and code co
 
 ## Deferred Inputs
 
-The following are hosted-deployment or future-adapter inputs rather than unresolved MVP architecture:
+The following are future deployment or adapter inputs rather than unresolved MVP architecture:
 
-- Cloudflare account-specific IDs, hostnames, and Access audience values.
+- Separate preview D1, hostname, and Access resources before preview releases are introduced.
 - A redacted native SubList JSON export fixture for the migration adapter.
 - Reminder and exchange-rate provider selection, because those features are outside the MVP.
