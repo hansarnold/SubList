@@ -834,6 +834,7 @@ button:disabled,
 .field {
   display: grid;
   min-width: 0;
+  align-content: start;
   gap: 7px;
 }
 
@@ -868,6 +869,7 @@ button:disabled,
 .field-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 16px;
 }
 
@@ -3175,8 +3177,6 @@ button:disabled,
 
 .settings-language,
 .settings-signout {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 20px;
   margin-top: 25px;
@@ -3184,9 +3184,20 @@ button:disabled,
   border-top: 1px solid var(--border);
 }
 
-.settings-language > div {
+.settings-language {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  align-items: start;
+}
+
+.settings-signout {
   display: flex;
   align-items: center;
+}
+
+.settings-language__intro {
+  display: flex;
+  align-items: flex-start;
   gap: 11px;
 }
 
@@ -3216,8 +3227,10 @@ button:disabled,
 
 .settings-language__fields {
   display: grid;
-  min-width: min(100%, 360px);
+  width: 100%;
+  min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 12px;
 }
 
@@ -4094,7 +4107,6 @@ button:disabled,
 
   .settings-language {
     align-items: stretch;
-    flex-direction: column;
   }
 
   .settings-signout {
@@ -4209,6 +4221,10 @@ button:disabled,
   }
 
   .resource-suggestion-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-language {
     grid-template-columns: 1fr;
   }
 

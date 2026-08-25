@@ -488,6 +488,23 @@ describe("account renewal-email defaults", () => {
     expect(screen.getByRole("combobox", { name: /^Email language/ })).toBeTruthy();
   });
 
+  it("keeps the two language fields in one explicit grid and renders email as read-only text", async () => {
+    vi.spyOn(api, "me").mockResolvedValue(user);
+    vi.spyOn(api, "session").mockResolvedValue(session(user, false));
+    renderRoute(<ProfileSettingsPage />, "/settings/profile", "/settings/profile");
+
+    const interfaceLanguage = await screen.findByRole("combobox", {
+      name: "Interface language",
+    });
+    const emailLanguage = screen.getByRole("combobox", { name: /^Email language/ });
+    const languageFields = interfaceLanguage.closest(".settings-language__fields");
+
+    expect(languageFields).toBeTruthy();
+    expect(emailLanguage.closest(".settings-language__fields")).toBe(languageFields);
+    expect(languageFields?.children).toHaveLength(2);
+    expect(screen.getByText(user.email).closest("label")).toBeNull();
+  });
+
   it("blocks unpausing while the account is safety-suspended", async () => {
     const suspendedUser = {
       ...user,

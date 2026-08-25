@@ -199,9 +199,10 @@ export function ProfileSettingsPage() {
         <InlineNotice tone="danger">{mutation.error.message}</InlineNotice>
       ) : null}
       <form className="settings-form" onSubmit={submit}>
-        <Field label={t("settings.email")}>
+        <div className="field">
+          <span className="field__label">{t("settings.email")}</span>
           <p className="read-only-value">{user.email}</p>
-        </Field>
+        </div>
         <Field label={t("settings.displayName")}>
           <input name="displayName" maxLength={120} defaultValue={user.displayName ?? ""} />
         </Field>
@@ -276,8 +277,8 @@ export function ProfileSettingsPage() {
         ) : null}
 
         <div className="settings-language settings-language--in-form">
-          <div>
-            <IconLanguage size={21} />
+          <div className="settings-language__intro">
+            <IconLanguage size={21} aria-hidden="true" />
             <div>
               <h3>{t("settings.languageAndAppearance")}</h3>
               <p>{t("settings.languagePreferencesHint")}</p>
