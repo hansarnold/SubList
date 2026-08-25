@@ -1,8 +1,9 @@
 # OpenSubLists MVP UI Flow
 
-> Status: Implemented baseline, resource-picker and chart refactor, and provider-gated
-> renewal email
-> Last updated: 2026-08-24
+> Status: Implemented baseline, Phase 5 resource/category/chart UX, independent
+> locales, and provider-gated renewal email; production email activation remains an
+> operator action
+> Last updated: 2026-08-25
 > Targets: Narrow and wide web-browser viewports
 
 ## 1. Product Experience Goals
@@ -30,6 +31,7 @@ Application behavior:
 ```text
 /
 ├── dashboard
+├── categories
 ├── subscriptions
 │   ├── new
 │   └── :subscriptionId
@@ -48,29 +50,74 @@ Application behavior:
 ### Wide Browser
 
 - Persistent left sidebar.
-- Primary items: Overview, Subscriptions, Settings.
+- Primary items: Overview, Categories, Subscriptions, Settings.
 - Global Add Subscription button remains visible.
 - Content uses a centered maximum width while lists may expand wider.
 
 ### Mobile
 
-- Bottom navigation for Dashboard, Subscriptions, and Settings.
+- Bottom navigation for Overview, Categories, Subscriptions, and Settings.
 - A prominent Add button is available from Dashboard and Subscriptions.
 - Create and edit forms use a full-screen route rather than a small modal.
 
 Navigation state is URL-driven so browser Back and Forward behavior remains predictable.
 
+### 4.1 Category Browsing and Management
+
+`/categories` is a browse route, not a second Settings screen. It groups active,
+unarchived subscriptions by saved category and includes a virtual `Uncategorized`
+group. `/settings/categories` remains the only create, edit, reorder, and delete
+surface. The browse-page header contains one `Manage categories` action that links to
+Settings; the two routes never appear active at the same time.
+
+At wide widths, category cards use two columns when each card retains a comfortable
+reading width. Narrow layouts use one column. Each card shows the category symbol,
+color, name, active count, reporting-currency estimated monthly average, restrained
+annualized estimate, earliest next renewal, and up to three active subscriptions in
+next-billing order. Subscription previews retain original amount, currency,
+recurrence, and next date. Information remains visible when FX conversion is
+unavailable; only the converted estimates use the concise FX-unavailable state.
+
+Only groups with at least one active, unarchived subscription appear, ordered by
+saved category position with `Uncategorized` last. Empty saved categories remain in
+Settings. When every group is empty, the page shows `Add subscription` as the primary
+action and `Manage categories` as the secondary action. The page has no period or
+currency selector; its monthly, annual, and next-renewal fields have fixed labels and
+meanings.
+
+Selecting a saved category opens
+`/subscriptions?categoryId=<id>&status=active`; selecting `Uncategorized` uses
+`categoryId=none`. The initial version has no category-detail route and makes no
+per-category requests. It composes the existing category, 30-day Dashboard, and
+active-subscription responses client-side.
+
+The card container is not an interactive element containing other links. The category
+title and `View all` open the filtered list, while a subscription preview may open its
+subscription detail. Keyboard focus and accessible names therefore describe each
+destination independently.
+
+Category cards use the existing surface, color, and symbol system. Photographic
+backgrounds, translucent image overlays, uploaded media, and remote category artwork
+are excluded. Every card prioritizes active count, explicit monthly and annual
+estimates, next renewal, and subscription previews in one stable reading order;
+decoration never displaces useful ledger information. Labels name explicit estimates
+and periods; the UI never uses an unqualified `Total due` value. Dashboard period or
+currency controls do not appear on Category Settings.
+
 ## 5. First-run Experience
 
 On the first login:
 
-1. Resolve the browser's IANA time zone and preferred locale.
+1. Resolve the browser's IANA time zone and initial interface locale.
 2. Suggest a reporting currency based on explicit user choice, not silent geolocation.
 3. Ask the user to confirm time zone and reporting currency.
-4. Offer a reviewed recommended-category checklist, individual category templates, Start Empty, and Create Custom Category.
+4. Offer a short compact group of common categories, Start Empty, and Create Category
+   without exposing preset terminology or a permanent template wall.
 5. Show an empty dashboard with one primary action: Add your first subscription.
 
-The user may skip display-name entry and all category choices. Recommended categories are created only after explicit confirmation and become ordinary editable rows. Payment methods are never bulk-created during onboarding.
+The user may skip display-name entry and all category choices. Common categories are
+created only after an explicit `Add categories` confirmation and become ordinary
+editable rows. Payment methods are never bulk-created during onboarding.
 
 ## 6. Dashboard
 
@@ -80,7 +127,7 @@ The user may skip display-name entry and all category choices. Recommended categ
 2. Next charge and charges due in the selected upcoming window.
 3. Grouped upcoming-charge agenda.
 4. Exact original-currency summaries.
-5. Category and payment-method breakdowns with Bar and Donut views.
+5. Category and payment-method breakdowns, each with separate Bar and Pie views.
 6. Recent or newly added subscriptions when useful.
 
 At wide browser widths, the four reporting-currency estimates form the prominent first summary row. The upcoming-charge agenda follows as the primary detailed content area, without turning the page into a dense analytics dashboard.
@@ -132,19 +179,21 @@ Display:
 - Add Subscription as the only primary action.
 - Import Existing Data as a secondary action when import is implemented.
 
-## 6.5 Breakdown Charts — Implemented
+## 6.5 Breakdown Charts — Phase 5 Revision Implemented
 
 Category and payment-method breakdowns visualize estimated monthly average in
-the reporting currency. Each breakdown provides Bar and Donut views backed by the
-same metric and an adjacent complete text list. Bars are the default. The view
-must never add raw values from different currencies or silently change from money to
-count when FX is unavailable.
+the reporting currency. Each breakdown shows a horizontal Bar chart and a Pie chart
+at the same time, backed by the same metric and one adjacent complete text table.
+There is no chart-mode toggle or locally persisted chart preference. The views must
+never add raw values from different currencies or silently change from money to count
+when FX is unavailable.
 
 The text list remains authoritative and includes the converted amount, approximate
-share, subscription count, and original-currency amounts. The chart is omitted
-for zero data, one positive group, or incomplete conversion, with an explicit state
-in its place. More detailed behavior is defined in
-[Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
+only for no positive data or incomplete conversion. One positive group renders one
+Bar and a 100% Pie. Category and payment-method sections stack vertically; each
+section places Bar and Pie side by side on wide screens and stacks them on narrow
+screens. More detailed behavior is defined in
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
 
 ## 7. Subscription List
 
@@ -214,12 +263,14 @@ Every [2] [weeks]
 ```
 
 Category and payment method use the same association-field pattern. Each field shows
-`None`, existing tenant rows, Create
-from Preset, Create Custom, and Manage in Settings. Choosing a preset or custom action
-opens the corresponding compact editor; only a successful explicit resource save
-returns a UUID to the subscription form. The same interaction is available on Create
-and Edit, including successful empty-list, loading, query-error, and
-resource-create-error states.
+an explicit empty choice, Saved resources, Common choices not already saved, and one
+Create action. User-facing copy never says `preset`. Selecting a saved row assigns it
+immediately. Choosing a common or custom option opens the corresponding compact
+editor; `Add and select` is the only primary action and only a successful resource
+save returns a UUID to the subscription form. The picker contains no multi-select
+checkboxes, repeated availability labels, or Manage-in-Settings link. The same
+interaction is available on Create and Edit, including successful empty-list,
+loading, query-error, and resource-create-error states.
 
 ## 8.2 Advanced Fields
 
@@ -229,15 +280,18 @@ Collapsed by default:
 - Website URL.
 - Notes.
 
-Renewal email is a separate visible section before Advanced options. When it is
+Renewal email is a separate visible section before Advanced options only when the
+deployment capability is available. When it is
 enabled, show the read-only current verified account email, `Use
 account default — N days before` using the live account value, a custom `0..365` day
 choice, and the calculated reminder date. `0` means the renewal date. Authentication
 verification of the account email is shown separately from the global sender
 capability. Per-recipient provider verification remains operator-managed and is not
 claimed by the UI. The account default never turns the toggle on. If the deployment
-has no configured sender, keep disabling possible but prevent a new opt-in and explain
-that the operator must configure email first.
+has no configured sender, omit unusable controls for a subscription with no saved
+opt-in instead of showing a global warning or disabled opt-in. A previously enabled
+saved preference remains visible and can still be turned off. Email language remains
+editable in Profile.
 
 The end-of-month toggle includes an example explaining the difference between February 28 → March 28 and February 28 → March 31.
 
@@ -320,26 +374,36 @@ Reactivation previews the newly calculated next billing date before confirmation
 
 ## 11.1 Profile
 
-- Verified email, read-only.
+- Verified Access account email, rendered as plain text rather than a disabled input.
 - Display name.
 - Time zone.
 - Reporting currency; it also prefills a new subscription and never rewrites existing amounts.
+- Interface language; changes application UI and persists independently.
+- Email language; changes only future renewal-email rendering.
 - Sign out.
 
 Changing time zone warns that the definition of local today may change near midnight, then reconciles active subscriptions.
 
-## 11.2 Renewal Email — Implemented and Provider-gated
+A difference between Interface language and Email language is valid. Do not show a
+mismatch warning, copy-language button, or confirmation dialog.
 
-- Persisted language for background-generated email: English or Simplified Chinese.
+The application never provides a change-email or reminder-recipient field. Identity
+and login-email changes are operator-managed through Cloudflare Access.
+
+## 11.2 Renewal Email — Provider-gated; Phase 5 Presentation Implemented
+
+- Email language is the independent Profile preference described above.
+- Every reminder goes only to the current Access account email. There is no account,
+  subscription, API, or archive recipient override.
 - Default lead time in `0..365`, initially seven days.
 - Whole-hour local delivery time, initially 09:00 in the configured IANA time zone.
 - `Pause all email reminders` as a global suppression control.
-- Verified primary email, read-only, with an explanation that Cloudflare provider
-  verification is a separate operator step on the free verified-destination path.
-- Deployment capability and failure state without provider names, tokens, or raw
-  errors.
-- A system-suspension warning that requires operator action and cannot be cleared by
-  the user pause switch. Unpause is also disabled while sender capability is absent.
+- Provider availability and destination verification are deployment concerns and do
+  not produce a normal Profile warning.
+- Default schedule and pause controls appear when delivery is configured. An
+  unavailable deployment does not expose a disabled switch.
+- A system-suspension error appears only when saved reminder choices are actually
+  affected and gives one operator-resolution path.
 - A concise explanation that global pause keeps every per-subscription choice saved,
   stops unstarted sends, and can resume only still-open reminder windows. An in-flight
   email cannot be recalled.
@@ -350,9 +414,14 @@ not infer either concept or preselect the toggle. Browser push remains out of sc
 ## 11.3 Categories
 
 - Ordered list with symbol, color, name, edit, and delete.
-- Empty and add states show recommended templates, the complete localized catalog, and Create Custom.
-- Selecting a template prefills localized name, color, and symbol; saved rows do not retain preset identity.
-- Add Recommended Categories reviews and atomically creates only missing ordinary rows.
+- One `Add category` action opens a compact dialog; the complete common catalog is
+  not rendered permanently in the page body.
+- The add dialog offers Common categories and Create category. Choosing a common item
+  prefills localized name, color, and symbol; `Add category` performs the save.
+- Existing normalized names are omitted from Common choices rather than shown as
+  disabled or `Already added` rows.
+- No Settings flow uses template checkboxes, `Ready to add`, `Add selected`, or `Use
+preset` copy.
 - Add and edit use the same compact form regardless of creation source.
 - Subscription Create and Edit reuse that compact form when a person creates a
   category from the association field.
@@ -361,7 +430,10 @@ not infer either concept or preselect the toggle. Browser push remains out of sc
 ## 11.4 Payment Methods
 
 - Ordered list with symbol, kind, name, and safe label.
-- Preset choices appear before the form. A selection only prefills name, kind, and symbol; the user must review and save it.
+- One `Add payment method` action opens a compact dialog containing Common payment
+  methods and Create payment method.
+- Choosing a common item prefills name, kind, and symbol; the primary action remains
+  `Add payment method`, never `Use preset`.
 - Subscription Create and Edit reuse the same review-and-save form from the payment
   association field.
 - The form explicitly asks only for a display label, not payment credentials.
@@ -394,7 +466,8 @@ resource name visible beside decorative output. Rendering fallbacks are:
 2. Validate size before upload.
 3. Select conflict strategy: Skip, Overwrite, or Duplicate, and whether to import
    profile settings.
-4. Request server preview for those exact options.
+4. Request server preview for those exact options. Runtime preview accepts current
+   schema V4 only; transform a V3 archive offline before selecting it.
 5. Display resource counts, conflicts, warnings, and reminder impact when present.
 6. Rerun preview whenever either option changes.
 7. Require an explicit confirmation.
@@ -451,8 +524,9 @@ Use the same not-found presentation for absent resources and resources owned by 
 
 - Initial locales: English and Simplified Chinese.
 - All UI strings use stable localization keys.
-- The selected locale is persisted on the user so scheduled renewal email does not
-  depend on browser `localStorage`.
+- Interface locale and email locale are persisted independently on the user.
+- Scheduled renewal email uses only email locale and never depends on browser
+  `localStorage`; interface changes do not invalidate reminder content.
 - Dates use the active locale but retain the user's configured time zone.
 - Currency formatting uses `Intl.NumberFormat` with explicit currency.
 - Internal status and error codes remain English identifiers.
@@ -479,7 +553,7 @@ This image is the selected visual reference for the authenticated wide-browser `
 - Combined reporting-currency estimates with visible rate metadata, plus original-currency summaries.
 - A 30-day renewal agenda following the prominent reporting summary, with a secondary 7-day view.
 - Original-currency details and restrained amount-based category and payment-method
-  breakdowns with user-selectable Donut views.
+  breakdowns with separately visible Bar and Pie views.
 - A compact first viewport that keeps charts secondary to direct values and lists.
 
 The image is directional rather than normative. Its product names, icons, amounts, dates, categories, and currency examples are mock content. The implementation must expose the approved four reporting-currency estimates, retain original-currency values, generate every recurrence occurrence inside the selected window, and preserve the route and API rules in this document. Resource symbols use the approved allow-listed icon or emoji model with documented fallbacks; the image does not authorize uploaded or remotely fetched service artwork.

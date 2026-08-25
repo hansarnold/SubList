@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.worker.config.ts",
     "migration:refactor": "node tools/refactor-migration/cli.mjs",
+    "migration:locale": "node tools/locale-migration/cli.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --config wrangler.example.jsonc --local",
     "db:migrate:preview": "wrangler d1 migrations apply DB --config wrangler.local.jsonc --env preview --remote",
     "db:migrate:production": "wrangler d1 migrations apply DB --config wrangler.local.jsonc --env production --remote",

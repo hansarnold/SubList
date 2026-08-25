@@ -18,7 +18,8 @@ const user: User = {
   timezone: "Asia/Shanghai",
   reportingCurrency: "USD",
   onboardingCompletedAt: "2026-08-01T00:00:00.000Z",
-  preferredLocale: "en",
+  interfaceLocale: "en",
+  emailLocale: "en",
   defaultEmailReminderDaysBefore: 7,
   emailReminderLocalTime: "09:00",
   emailRemindersPaused: false,
@@ -263,18 +264,19 @@ describe("subscription renewal-email preference", () => {
     );
   });
 
-  it("blocks a new opt-in when delivery capability is unavailable", async () => {
+  it("omits reminder controls for a new subscription when delivery is unavailable", async () => {
     mockSubscriptionPage({ emailReminders: false });
     renderRoute(<SubscriptionFormPage />, "/subscriptions/new", "/subscriptions/new");
 
-    const reminder = await screen.findByRole<HTMLInputElement>("checkbox", {
-      name: /Email me before this estimated renewal/,
-    });
-    expect(reminder.disabled).toBe(true);
-    expect(screen.getByText(/Email reminders are not configured for this deployment/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Add subscription" })).toBeTruthy();
+    expect(
+      screen.queryByRole("checkbox", { name: /Email me before this estimated renewal/ }),
+    ).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Renewal email" })).toBeNull();
+    expect(screen.queryByText(/not configured for this deployment/i)).toBeNull();
   });
 
-  it("keeps a saved opt-out disabled when delivery capability is unavailable", async () => {
+  it("omits reminder controls for a saved opt-out when delivery is unavailable", async () => {
     const record = detail("none", { emailReminderEnabled: false });
     mockSubscriptionPage({ emailReminders: false, record });
     renderRoute(
@@ -283,11 +285,11 @@ describe("subscription renewal-email preference", () => {
       "/subscriptions/:subscriptionId/edit",
     );
 
-    const reminder = await screen.findByRole<HTMLInputElement>("checkbox", {
-      name: /Email me before this estimated renewal/,
-    });
-    expect(reminder.checked).toBe(false);
-    expect(reminder.disabled).toBe(true);
+    expect(await screen.findByRole("heading", { name: "Edit subscription" })).toBeTruthy();
+    expect(
+      screen.queryByRole("checkbox", { name: /Email me before this estimated renewal/ }),
+    ).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Renewal email" })).toBeNull();
   });
 
   it("allows an unavailable deployment to disable a previously saved opt-in", async () => {
@@ -303,11 +305,10 @@ describe("subscription renewal-email preference", () => {
       "/subscriptions/:subscriptionId/edit",
     );
 
-    const reminder = await screen.findByRole<HTMLInputElement>("checkbox", {
-      name: /Email me before this estimated renewal/,
-    });
-    expect(reminder.disabled).toBe(false);
-    fireEvent.click(reminder);
+    const turnOff = await screen.findByRole("button", { name: "Turn off reminder" });
+    expect(screen.queryByRole("checkbox", { name: /Email me before/ })).toBeNull();
+    fireEvent.click(turnOff);
+    expect(screen.getByText(/will be turned off when you save changes/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledOnce());
@@ -317,30 +318,28 @@ describe("subscription renewal-email preference", () => {
     );
   });
 
-  it("lets a retained opt-in be toggled off and back on in the same unavailable draft", async () => {
+  it("does not expose a re-enable action after turning off an unavailable saved reminder", async () => {
     const record = detail("paused");
     mockSubscriptionPage({ emailReminders: false, record });
-    const update = vi.spyOn(api, "updateSubscription").mockResolvedValue(record);
+    const update = vi.spyOn(api, "updateSubscription").mockResolvedValue({
+      ...record,
+      emailReminderEnabled: false,
+    });
     renderRoute(
       <SubscriptionFormPage />,
       `/subscriptions/${record.id}/edit`,
       "/subscriptions/:subscriptionId/edit",
     );
 
-    const reminder = await screen.findByRole<HTMLInputElement>("checkbox", {
-      name: /Email me before this estimated renewal/,
-    });
-    fireEvent.click(reminder);
-    expect(reminder.checked).toBe(false);
-    expect(reminder.disabled).toBe(false);
-    fireEvent.click(reminder);
-    expect(reminder.checked).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Turn off reminder" }));
+    expect(screen.queryByRole("button", { name: "Turn off reminder" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Email me before/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledOnce());
     expect(update).toHaveBeenCalledWith(
       record.id,
-      expect.objectContaining({ emailReminderEnabled: true }),
+      expect.objectContaining({ emailReminderEnabled: false }),
     );
   });
 
@@ -406,6 +405,34 @@ describe("subscription renewal-email preference", () => {
 });
 
 describe("account renewal-email defaults", () => {
+  it("saves email language independently without changing the interface language", async () => {
+    vi.spyOn(api, "me").mockResolvedValue(user);
+    vi.spyOn(api, "session").mockResolvedValue(session(user, false));
+    const update = vi.spyOn(api, "updateMe").mockResolvedValue({
+      ...user,
+      emailLocale: "zh-Hans",
+    });
+    renderRoute(<ProfileSettingsPage />, "/settings/profile", "/settings/profile");
+
+    const interfaceLanguage = await screen.findByRole("combobox", {
+      name: "Interface language",
+    });
+    const emailLanguage = screen.getByRole("combobox", {
+      name: /^Email language/,
+    });
+    fireEvent.change(emailLanguage, { target: { value: "zh-Hans" } });
+
+    expect((interfaceLanguage as unknown as { value: string }).value).toBe("en");
+    expect(screen.getByRole("heading", { name: "Profile" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledOnce());
+    expect(update.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ interfaceLocale: "en", emailLocale: "zh-Hans" }),
+    );
+  });
+
   it("saves timing defaults and a global pause without opting any subscription in", async () => {
     vi.spyOn(api, "me").mockResolvedValue(user);
     vi.spyOn(api, "session").mockResolvedValue(session(user, true));
@@ -448,17 +475,17 @@ describe("account renewal-email defaults", () => {
     });
   });
 
-  it("blocks unpausing when this deployment has no sender capability", async () => {
+  it("omits unavailable reminder controls without showing a provider warning", async () => {
     const pausedUser = { ...user, emailRemindersPaused: true };
     vi.spyOn(api, "me").mockResolvedValue(pausedUser);
     vi.spyOn(api, "session").mockResolvedValue(session(pausedUser, false));
     renderRoute(<ProfileSettingsPage />, "/settings/profile", "/settings/profile");
 
-    const pause = await screen.findByRole<HTMLInputElement>("checkbox", {
-      name: /Pause all email reminders/,
-    });
-    expect(pause.checked).toBe(true);
-    expect(pause.disabled).toBe(true);
+    expect(await screen.findByRole("heading", { name: "Profile" })).toBeTruthy();
+    expect(screen.queryByRole("checkbox", { name: /Pause all email reminders/ })).toBeNull();
+    expect(screen.queryByText(/not configured for this deployment/i)).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Interface language" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: /^Email language/ })).toBeTruthy();
   });
 
   it("blocks unpausing while the account is safety-suspended", async () => {
@@ -495,6 +522,35 @@ describe("renewal-email delivery summary", () => {
     expect(await screen.findByText("Off")).toBeTruthy();
     expect(screen.getByText(/Account defaults do not opt it in automatically/)).toBeTruthy();
     expect(screen.queryByText("Sent")).toBeNull();
+  });
+
+  it("does not offer reminder configuration for an opt-out when delivery is unavailable", async () => {
+    const record = detail("none", { emailReminderEnabled: false });
+    mockSubscriptionPage({ emailReminders: false, record });
+    renderRoute(
+      <SubscriptionDetailPage />,
+      `/subscriptions/${record.id}`,
+      "/subscriptions/:subscriptionId",
+    );
+
+    expect(await screen.findByText("Off")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Configure reminder" })).toBeNull();
+  });
+
+  it("keeps a turn-off path for an enabled reminder when delivery is unavailable", async () => {
+    const record = detail("paused");
+    mockSubscriptionPage({ emailReminders: false, record });
+    renderRoute(
+      <SubscriptionDetailPage />,
+      `/subscriptions/${record.id}`,
+      "/subscriptions/:subscriptionId",
+    );
+
+    expect(await screen.findByText("Paused")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Turn off reminder" }).getAttribute("href")).toBe(
+      `/subscriptions/${record.id}/edit`,
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it.each([

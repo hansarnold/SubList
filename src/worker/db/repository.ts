@@ -220,7 +220,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository, Reminde
       timezone: "UTC",
       reportingCurrency: "USD",
       onboardingCompletedAt: null,
-      preferredLocale: "en",
+      interfaceLocale: "en",
+      emailLocale: "en",
       defaultEmailReminderDaysBefore: 7,
       emailReminderLocalTime: "09:00",
       emailRemindersPaused: false,
@@ -315,11 +316,15 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository, Reminde
       assignments.push("reporting_currency = ?");
       values.push(patch.reportingCurrency);
     }
-    if (patch.preferredLocale !== undefined) {
+    if (patch.interfaceLocale !== undefined) {
       assignments.push("preferred_locale = ?");
-      values.push(patch.preferredLocale);
-      revisionConditions.push("preferred_locale IS NOT ?");
-      revisionValues.push(patch.preferredLocale);
+      values.push(patch.interfaceLocale);
+    }
+    if (patch.emailLocale !== undefined) {
+      assignments.push("email_locale = ?");
+      values.push(patch.emailLocale);
+      revisionConditions.push("email_locale IS NOT ?");
+      revisionValues.push(patch.emailLocale);
     }
     if (patch.defaultEmailReminderDaysBefore !== undefined) {
       assignments.push("default_email_reminder_days_before = ?");
@@ -1578,6 +1583,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository, Reminde
            AND reporting_currency IS ?
            AND onboarding_completed_at IS ?
            AND preferred_locale IS ?
+           AND email_locale IS ?
            AND default_email_reminder_days_before IS ?
            AND email_reminder_local_time IS ?
            AND email_reminders_paused IS ?
@@ -1596,7 +1602,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository, Reminde
         user.timezone,
         user.reportingCurrency,
         user.onboardingCompletedAt,
-        user.preferredLocale,
+        user.interfaceLocale,
+        user.emailLocale,
         user.defaultEmailReminderDaysBefore,
         user.emailReminderLocalTime,
         user.emailRemindersPaused ? 1 : 0,

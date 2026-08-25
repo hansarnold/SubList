@@ -31,6 +31,8 @@ describe("refactored D1 repository", () => {
     expect(user).toMatchObject({
       reportingCurrency: "USD",
       onboardingCompletedAt: null,
+      interfaceLocale: "en",
+      emailLocale: "en",
     });
 
     const updated = await repository.updateUser(user.id, { reportingCurrency: "CNY" }, 20);
@@ -179,7 +181,8 @@ describe("refactored D1 repository", () => {
         displayName: "Imported",
         timezone: "Asia/Shanghai",
         reportingCurrency: "CNY",
-        preferredLocale: "en",
+        interfaceLocale: "zh-Hans",
+        emailLocale: "en",
         defaultEmailReminderDaysBefore: 7,
         emailReminderLocalTime: "09:00",
         emailRemindersPaused: false,
@@ -192,6 +195,8 @@ describe("refactored D1 repository", () => {
       displayName: "Imported",
       timezone: "Asia/Shanghai",
       reportingCurrency: "CNY",
+      interfaceLocale: "zh-Hans",
+      emailLocale: "en",
     });
     expect(await repository.getCategory(user.id, category.id)).toMatchObject({
       symbol: { type: "emoji", value: "📚" },

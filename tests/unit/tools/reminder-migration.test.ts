@@ -3,23 +3,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import type { OpenSubListsArchiveV3 } from "../../../src/shared/api-types";
-import { archiveV3Schema } from "../../../src/shared/api-types/schemas";
+import type { OpenSubListsArchiveV3, OpenSubListsArchiveV4 } from "../../../src/shared/api-types";
+import { archiveV3Schema, archiveV4Schema } from "../../../src/shared/api-types/schemas";
 // @ts-expect-error The operator tool is intentionally plain JavaScript outside the app TS build.
 import * as untypedReminderMigration from "../../../tools/reminder-migration/index.js";
 
 type ReminderMigrationModule = {
   ReminderMigrationError: new (...args: unknown[]) => Error;
   transformArchiveV2: (sourceText: string) => OpenSubListsArchiveV3;
+  transformArchiveV3: (sourceText: string) => OpenSubListsArchiveV4;
   migrateReminderArchiveFile: (options: {
     inputPath: string;
     outputPath: string;
     overwrite?: boolean;
   }) => Promise<OpenSubListsArchiveV3>;
+  migrateLocaleArchiveFile: (options: {
+    inputPath: string;
+    outputPath: string;
+    overwrite?: boolean;
+  }) => Promise<OpenSubListsArchiveV4>;
 };
 
-const { ReminderMigrationError, migrateReminderArchiveFile, transformArchiveV2 } =
-  untypedReminderMigration as unknown as ReminderMigrationModule;
+const {
+  ReminderMigrationError,
+  migrateLocaleArchiveFile,
+  migrateReminderArchiveFile,
+  transformArchiveV2,
+  transformArchiveV3,
+} = untypedReminderMigration as unknown as ReminderMigrationModule;
 
 describe("offline reminder archive migration", () => {
   it("adds exact safe profile defaults and explicitly opts every subscription out", () => {
@@ -149,6 +160,119 @@ describe("offline reminder archive migration", () => {
     }
   });
 });
+
+describe("offline split-locale archive migration", () => {
+  it("splits the V3 locale without changing reminder preferences or business data", () => {
+    const source = archiveV3("zh-Hans");
+
+    const transformed = transformArchiveV3(JSON.stringify(source));
+
+    expect(transformed.schemaVersion).toBe(4);
+    expect(transformed.profile).toEqual({
+      displayName: null,
+      timezone: "UTC",
+      reportingCurrency: "USD",
+      defaultEmailReminderDaysBefore: 7,
+      emailReminderLocalTime: "09:00",
+      emailRemindersPaused: false,
+      interfaceLocale: "zh-Hans",
+      emailLocale: "zh-Hans",
+    });
+    expect("preferredLocale" in transformed.profile).toBe(false);
+    expect(transformed.categories).toEqual(source.categories);
+    expect(transformed.paymentMethods).toEqual(source.paymentMethods);
+    expect(transformed.subscriptions).toEqual(source.subscriptions);
+    expect(archiveV4Schema.safeParse(transformed).success).toBe(true);
+  });
+
+  it("rejects a source that is not a strict V3 locale archive", () => {
+    const source = archiveV3();
+    const invalidSource = {
+      ...source,
+      profile: {
+        ...source.profile,
+        preferredLocale: "fr",
+      },
+    };
+
+    expect(() => transformArchiveV3(JSON.stringify(invalidSource))).toThrow(ReminderMigrationError);
+  });
+
+  it("writes a private V4 artifact and refuses an accidental overwrite", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opensublists-locale-migration-"));
+    const inputPath = join(directory, "archive-v3.json");
+    const outputPath = join(directory, "archive-v4.json");
+    try {
+      await writeFile(inputPath, JSON.stringify(archiveV3("zh-Hans")), "utf8");
+
+      const migrated = await migrateLocaleArchiveFile({ inputPath, outputPath });
+
+      expect(migrated).toMatchObject({
+        schemaVersion: 4,
+        profile: { interfaceLocale: "zh-Hans", emailLocale: "zh-Hans" },
+      });
+      expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+      const written: unknown = JSON.parse(await readFile(outputPath, "utf8"));
+      expect(archiveV4Schema.safeParse(written).success).toBe(true);
+      await expect(migrateLocaleArchiveFile({ inputPath, outputPath })).rejects.toMatchObject({
+        code: "OUTPUT_EXISTS",
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an oversized archive before creating an output artifact", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opensublists-locale-oversized-"));
+    const inputPath = join(directory, "archive-v3.json");
+    const outputPath = join(directory, "archive-v4.json");
+    try {
+      await writeFile(inputPath, Buffer.alloc(5 * 1024 * 1024 + 1, 0x20));
+
+      await expect(migrateLocaleArchiveFile({ inputPath, outputPath })).rejects.toMatchObject({
+        code: "INPUT_TOO_LARGE",
+      });
+      await expect(stat(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("atomically replaces a locale archive with owner-only permissions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opensublists-locale-overwrite-"));
+    const inputPath = join(directory, "archive-v3.json");
+    const outputPath = join(directory, "archive-v4.json");
+    try {
+      await writeFile(inputPath, JSON.stringify(archiveV3()), "utf8");
+      await writeFile(outputPath, "stale public output", { encoding: "utf8", mode: 0o644 });
+      await chmod(outputPath, 0o644);
+
+      await migrateLocaleArchiveFile({ inputPath, outputPath, overwrite: true });
+
+      expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+      const written: unknown = JSON.parse(await readFile(outputPath, "utf8"));
+      expect(archiveV4Schema.safeParse(written).success).toBe(true);
+      expect(written).toMatchObject({
+        schemaVersion: 4,
+        profile: { interfaceLocale: "en", emailLocale: "en" },
+      });
+      expect((await readdir(directory)).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+function archiveV3(locale: "en" | "zh-Hans" = "en"): OpenSubListsArchiveV3 {
+  const archive = transformArchiveV2(JSON.stringify(archiveV2()));
+  return {
+    ...archive,
+    profile: {
+      ...archive.profile,
+      preferredLocale: locale,
+    },
+  };
+}
 
 function paymentMethod(label: string) {
   const timestamp = "2026-08-24T00:00:00.000Z";

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, createExecutionContext } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
 import { OpenSubListsService } from "../../src/application/service";
-import type { OpenSubListsArchiveV3 } from "../../src/shared/api-types";
+import type { OpenSubListsArchiveV4 } from "../../src/shared/api-types";
 import { importRequestSchema } from "../../src/shared/api-types/schemas";
 import worker from "../../src/worker";
 import { D1OpenSubListsRepository } from "../../src/worker/db/repository";
@@ -276,6 +276,8 @@ describe("OpenSubLists Worker API", () => {
     expect(exported.headers.get("Content-Disposition")).toMatch(/^attachment;/);
     const archive = await exported.json<{
       format: string;
+      schemaVersion: number;
+      profile: { interfaceLocale: string; emailLocale: string };
       categories: Array<{ id: string }>;
       paymentMethods: Array<{ id: string }>;
       subscriptions: Array<{
@@ -285,6 +287,8 @@ describe("OpenSubLists Worker API", () => {
       }>;
     }>();
     expect(archive.format).toBe("opensublists");
+    expect(archive.schemaVersion).toBe(4);
+    expect(archive.profile).toMatchObject({ interfaceLocale: "en", emailLocale: "en" });
     expect(archive).not.toHaveProperty("userId");
     expect(archive.categories).toContainEqual(expect.objectContaining({ id: category.id }));
     expect(archive.paymentMethods).toContainEqual(
@@ -319,7 +323,7 @@ describe("OpenSubLists Worker API", () => {
       {
         path: "/api/v1/imports/preview",
         body: {
-          archive: { ...archiveWithSubscriptions(0), schemaVersion: 1 },
+          archive: { ...archiveWithSubscriptions(0), schemaVersion: 3 },
           conflictStrategy: "skip",
           importProfile: false,
         },
@@ -327,7 +331,7 @@ describe("OpenSubLists Worker API", () => {
       {
         path: "/api/v1/imports",
         body: {
-          archive: { ...archiveWithSubscriptions(0), schemaVersion: 2 },
+          archive: { ...archiveWithSubscriptions(0), schemaVersion: 3 },
           expectedDigest: `sha256-${"0".repeat(64)}`,
           conflictStrategy: "skip",
           importProfile: false,
@@ -765,11 +769,11 @@ async function seedSubscriptions(
     .run();
 }
 
-function archiveWithSubscriptions(count: number): OpenSubListsArchiveV3 {
+function archiveWithSubscriptions(count: number): OpenSubListsArchiveV4 {
   const timestamp = new Date().toISOString();
   return {
     format: "opensublists",
-    schemaVersion: 3,
+    schemaVersion: 4,
     archiveId: crypto.randomUUID(),
     exportedAt: timestamp,
     generator: { name: "OpenSubLists", version: "integration-test" },
@@ -777,7 +781,8 @@ function archiveWithSubscriptions(count: number): OpenSubListsArchiveV3 {
       displayName: null,
       timezone: "UTC",
       reportingCurrency: "USD",
-      preferredLocale: "en",
+      interfaceLocale: "en",
+      emailLocale: "en",
       defaultEmailReminderDaysBefore: 7,
       emailReminderLocalTime: "09:00",
       emailRemindersPaused: false,

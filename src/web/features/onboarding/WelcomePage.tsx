@@ -16,7 +16,6 @@ import {
 } from "../../../shared/presets";
 import { setLanguage } from "../../i18n";
 
-type OnboardingMode = "recommended" | "empty";
 type SupportedLanguage = "en" | "zh-Hans";
 
 const recommendedPresetKeySet: ReadonlySet<CategoryPresetKey> = new Set(
@@ -48,7 +47,6 @@ export function WelcomePage() {
   const userId = session?.user.id ?? "pending";
   const initialLanguage: SupportedLanguage = i18n.language.startsWith("zh") ? "zh-Hans" : "en";
   const [language, setSelectedLanguage] = useState<SupportedLanguage>(initialLanguage);
-  const [mode, setMode] = useState<OnboardingMode>("recommended");
   const [selectedPresetKeys, setSelectedPresetKeys] = useState<ReadonlySet<CategoryPresetKey>>(
     () => new Set(RECOMMENDED_CATEGORY_PRESET_KEYS),
   );
@@ -67,7 +65,8 @@ export function WelcomePage() {
         displayName: input.displayName,
         timezone: input.timezone,
         reportingCurrency: input.reportingCurrency,
-        preferredLocale: input.language,
+        interfaceLocale: input.language,
+        emailLocale: input.language,
       });
 
       const existingCategories = await api.categories();
@@ -130,7 +129,7 @@ export function WelcomePage() {
       timezone: formValue(values, "timezone").trim(),
       reportingCurrency,
       language,
-      presetKeys: mode === "recommended" ? [...selectedPresetKeys] : [],
+      presetKeys: [...selectedPresetKeys],
     });
   }
 
@@ -211,52 +210,38 @@ export function WelcomePage() {
               <strong>{t("onboarding.categoriesTitle")}</strong>
             </legend>
             <p>{t("onboarding.categoriesIntro")}</p>
-            <label className="checkbox-field">
-              <input
-                type="radio"
-                name="categoryMode"
-                value="recommended"
-                checked={mode === "recommended"}
-                onChange={() => setMode("recommended")}
-              />
-              <span>
-                <strong>{t("onboarding.useRecommended")}</strong>
-                <small>{t("onboarding.useRecommendedHint")}</small>
-              </span>
-            </label>
-            <div className="resource-list">
+            <div className="resource-suggestion-grid onboarding-category-choices">
               {recommendedPresets.map((preset) => {
                 const name = t(preset.labelKey);
                 return (
-                  <label className="resource-row checkbox-field" key={preset.key}>
-                    <input
-                      type="checkbox"
-                      checked={selectedPresetKeys.has(preset.key)}
-                      disabled={mode === "empty"}
-                      onChange={() => togglePreset(preset.key)}
-                    />
+                  <button
+                    type="button"
+                    key={preset.key}
+                    className={selectedPresetKeys.has(preset.key) ? "is-selected" : undefined}
+                    aria-pressed={selectedPresetKeys.has(preset.key)}
+                    onClick={() => togglePreset(preset.key)}
+                  >
                     <CategorySymbol symbol={preset.symbol} color={preset.color} size={22} />
                     <span>
                       <strong>{name}</strong>
-                      <small>{t("onboarding.categoryWillBeCreated")}</small>
+                      <small>
+                        {selectedPresetKeys.has(preset.key)
+                          ? t("onboarding.categorySelected")
+                          : t("onboarding.categoryNotSelected")}
+                      </small>
                     </span>
-                  </label>
+                  </button>
                 );
               })}
             </div>
-            <label className="checkbox-field">
-              <input
-                type="radio"
-                name="categoryMode"
-                value="empty"
-                checked={mode === "empty"}
-                onChange={() => setMode("empty")}
-              />
-              <span>
-                <strong>{t("onboarding.startEmpty")}</strong>
-                <small>{t("onboarding.startEmptyHint")}</small>
-              </span>
-            </label>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setSelectedPresetKeys(new Set())}
+              disabled={selectedPresetKeys.size === 0}
+            >
+              {t("onboarding.startEmpty")}
+            </Button>
           </fieldset>
 
           <InlineNotice>

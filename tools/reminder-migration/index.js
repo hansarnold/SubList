@@ -1,5 +1,5 @@
 import { constants as fileConstants } from "node:fs";
-import { access, chmod, open, readFile, rename, unlink } from "node:fs/promises";
+import { access, chmod, link, open, rename, unlink } from "node:fs/promises";
 import { z } from "zod";
 
 const MAX_ARCHIVE_BYTES = 5 * 1024 * 1024;
@@ -177,6 +177,13 @@ const archiveV3Schema = archiveV2Schema.extend({
   }),
   subscriptions: z.array(subscriptionV3Schema).max(50),
 });
+const archiveV4Schema = archiveV3Schema.extend({
+  schemaVersion: z.literal(4),
+  profile: archiveV3Schema.shape.profile.omit({ preferredLocale: true }).extend({
+    interfaceLocale: z.enum(["en", "zh-Hans"]),
+    emailLocale: z.enum(["en", "zh-Hans"]),
+  }),
+});
 
 export class ReminderMigrationError extends Error {
   constructor(code, message, issues = []) {
@@ -235,11 +242,58 @@ export function transformArchiveV2(sourceText) {
   return validated.data;
 }
 
-export async function migrateReminderArchiveFile({ inputPath, outputPath, overwrite = false }) {
-  const source = await readFile(inputPath);
-  if (source.byteLength > MAX_ARCHIVE_BYTES) {
-    throw new ReminderMigrationError("INPUT_TOO_LARGE", "The source archive exceeds 5 MiB.");
+export function transformArchiveV3(sourceText) {
+  assertByteLimit(sourceText);
+  let source;
+  try {
+    source = JSON.parse(sourceText);
+  } catch {
+    throw new ReminderMigrationError("INVALID_JSON", "The source archive is not valid JSON.");
   }
+  const parsed = archiveV3Schema.safeParse(source);
+  if (!parsed.success) {
+    throw new ReminderMigrationError(
+      "INVALID_ARCHIVE_V3",
+      "The source is not a strict OpenSubLists archive version 3.",
+      parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+    );
+  }
+
+  const archive = parsed.data;
+  const { preferredLocale, ...profile } = archive.profile;
+  const transformed = {
+    ...archive,
+    schemaVersion: 4,
+    profile: {
+      ...profile,
+      interfaceLocale: preferredLocale,
+      emailLocale: preferredLocale,
+    },
+  };
+  const validated = archiveV4Schema.safeParse(transformed);
+  if (!validated.success) {
+    throw new ReminderMigrationError(
+      "INVALID_ARCHIVE_V4_RESULT",
+      "The transformed archive did not satisfy the split-locale archive contract.",
+      validated.error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        message: issue.message,
+      })),
+    );
+  }
+  return validated.data;
+}
+
+export async function migrateReminderArchiveFile({ inputPath, outputPath, overwrite = false }) {
+  return migrateArchiveFile({ inputPath, outputPath, overwrite }, transformArchiveV2);
+}
+
+export async function migrateLocaleArchiveFile({ inputPath, outputPath, overwrite = false }) {
+  return migrateArchiveFile({ inputPath, outputPath, overwrite }, transformArchiveV3);
+}
+
+async function migrateArchiveFile({ inputPath, outputPath, overwrite }, transform) {
+  const source = await readBoundedArchive(inputPath);
   if (!overwrite) {
     try {
       await access(outputPath, fileConstants.F_OK);
@@ -249,32 +303,58 @@ export async function migrateReminderArchiveFile({ inputPath, outputPath, overwr
       if (!isNodeError(error) || error.code !== "ENOENT") throw error;
     }
   }
-  const transformed = transformArchiveV2(source.toString("utf8"));
+  const transformed = transform(source.toString("utf8"));
   const serialized = `${JSON.stringify(transformed, null, 2)}\n`;
-  if (overwrite) {
-    const temporaryPath = `${outputPath}.${crypto.randomUUID()}.tmp`;
-    try {
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.writeFile(serialized, "utf8");
-      } finally {
-        await handle.close();
-      }
-      await rename(temporaryPath, outputPath);
-    } catch (error) {
-      await unlink(temporaryPath).catch(() => undefined);
-      throw error;
-    }
-  } else {
-    const handle = await open(outputPath, "wx", 0o600);
+  const temporaryPath = `${outputPath}.${crypto.randomUUID()}.tmp`;
+  try {
+    const handle = await open(temporaryPath, "wx", 0o600);
     try {
       await handle.writeFile(serialized, "utf8");
+      await handle.sync();
     } finally {
       await handle.close();
     }
+    if (overwrite) {
+      await rename(temporaryPath, outputPath);
+    } else {
+      try {
+        await link(temporaryPath, outputPath);
+      } catch (error) {
+        if (isNodeError(error) && error.code === "EEXIST") {
+          throw new ReminderMigrationError(
+            "OUTPUT_EXISTS",
+            "Refusing to overwrite the output file.",
+          );
+        }
+        throw error;
+      }
+      await unlink(temporaryPath).catch(() => undefined);
+    }
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
   }
   await chmod(outputPath, 0o600);
   return transformed;
+}
+
+async function readBoundedArchive(inputPath) {
+  const handle = await open(inputPath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(MAX_ARCHIVE_BYTES + 1);
+    let offset = 0;
+    while (offset < buffer.byteLength) {
+      const { bytesRead } = await handle.read(buffer, offset, buffer.byteLength - offset, null);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > MAX_ARCHIVE_BYTES) {
+      throw new ReminderMigrationError("INPUT_TOO_LARGE", "The source archive exceeds 5 MiB.");
+    }
+    return buffer.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
 }
 
 function assertByteLimit(value) {

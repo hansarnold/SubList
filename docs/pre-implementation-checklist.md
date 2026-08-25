@@ -1,8 +1,8 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: First hosted deployment online; Phase 4 is implemented locally, while
-> GitHub Pages publication and production email activation remain operator-gated
-> Last updated: 2026-08-24
+> Status: Phase 5 is implemented and verified, and migration 0007 is applied in
+> production; the Phase 5 Worker rollout and email activation remain operator-gated
+> Last updated: 2026-08-25
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
 
@@ -166,7 +166,9 @@ These inputs do not block local use:
 
 ## 12. Next Delivery Step
 
-Provision isolated preview resources before enabling regular preview releases, and complete the remaining hosted lifecycle smoke test.
+Deploy the reviewed Phase 5 application with email still disabled, then treat
+activation for one verified operator destination as a separate rollout. Provision
+isolated preview resources before regular preview releases.
 
 ## 13. Refactor Implementation Gate — Complete
 
@@ -181,7 +183,7 @@ Provision isolated preview resources before enabling regular preview releases, a
 - [x] Rehearse and verify the cutover before changing the production D1 binding.
 - [x] Keep the previous Worker/database pair available until explicit operator acceptance.
 
-## 14. Phase 4 Follow-up Gate — Implemented Locally
+## 14. Phase 4 Follow-up Gate — Deployed
 
 - [x] Identify why empty category and payment-method selectors show only `None`.
 - [x] Define one shared preset/custom creation flow for subscription Create and Edit.
@@ -207,7 +209,7 @@ Provision isolated preview resources before enabling regular preview releases, a
 - [x] Implement and test the shared resource association fields.
 - [x] Correct the existing category bar metric and implement the approved chart views.
 - [x] Build and validate the VitePress documentation site and Pages workflow locally.
-- [ ] Enable GitHub Actions as the Pages source, publish, and verify the default project URL.
+- [x] Enable GitHub Actions as the Pages source, publish, and verify the default project URL.
 - [x] Add reminder migrations, API/archive fields, UI, fake sender, D1 outbox, and
       hourly scheduled service.
 - [ ] Configure a private sender binding, verify an operator destination, run the
@@ -217,3 +219,33 @@ Provision isolated preview resources before enabling regular preview releases, a
 
 Evidence:
 [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md)
+
+## 15. Phase 5 Corrective Gate — Implemented; Release and Activation Pending
+
+- [x] Diagnose the wide resource-row layout defect and ambiguous preset operations.
+- [x] Define separate Interface language and Email language preferences with no
+      mismatch warning.
+- [x] Define compact Saved, Common, Create, and Add-and-select resource flows.
+- [x] Define removal of non-actionable provider notices, disabled reminder controls,
+      repeated statuses, Settings links inside selectors, and chart-mode buttons.
+- [x] Define separate simultaneous Bar and Pie visualizations and one-group behavior.
+- [x] Confirm that email activation reuses the existing Worker, hourly Cron, D1
+      outbox, and provider adapter.
+- [x] Confirm the verified-destination Free path, manual fake no-send run, natural
+      production no-send run, operator-first delivery, and independent rollback.
+- [x] Fix the reminder recipient to the current Access account email and reject every
+      in-app, API, archive, and per-subscription recipient override.
+- [x] Reconcile and implement the D1, API, archive V4, Settings, resource-picker, and
+      Dashboard contracts.
+- [x] Cover migration 0007 with fresh-database and populated-upgrade tests and add the
+      strict offline V3-to-V4 archive transformer.
+- [x] Create an exact production recovery point, apply migration 0007, and verify
+      unchanged tenant-row counts plus the locale backfill.
+- [ ] Transform and review any retained private V3 archive before a future import or
+      transfer; keep both copies outside the repository.
+- [x] Pass wide, narrow, keyboard, sparse-chart, FX, reminder, privacy, dry-run, and
+      documentation checks.
+- [ ] Verify one operator email before enabling any friend reminder.
+
+Evidence:
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md)

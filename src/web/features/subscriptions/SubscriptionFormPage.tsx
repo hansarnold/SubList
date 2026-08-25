@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { IconArrowLeft, IconBell, IconCalendarEvent, IconChevronDown } from "@tabler/icons-react";
 import { type FormEvent, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../../api/client";
 import { categoriesQueryKey, paymentMethodsQueryKey, sessionQueryKey } from "../../api/query-keys";
 import { type ResourceSymbol } from "../../../domain/symbol";
@@ -208,7 +208,6 @@ function SubscriptionFormEditor({
 }: SubscriptionFormEditorProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const queryClient = useQueryClient();
   const isEditing = Boolean(subscriptionId);
   const [form, setForm] = useState<FormState>(() =>
@@ -302,8 +301,7 @@ function SubscriptionFormEditor({
     ? Number(form.emailReminderDaysBefore)
     : account.defaultEmailReminderDaysBefore;
   const persistedReminderEnabled = subscription?.emailReminderEnabled ?? false;
-  const reminderToggleDisabled =
-    mutation.isPending || (!emailRemindersAvailable && !persistedReminderEnabled);
+  const showReminderSection = emailRemindersAvailable || persistedReminderEnabled;
   const reminderPreview = useMemo(() => {
     if (
       !form.emailReminderEnabled ||
@@ -521,7 +519,6 @@ function SubscriptionFormEditor({
                 error={categoriesError}
                 validationError={errors.categoryId}
                 disabled={mutation.isPending}
-                manageFrom={`${location.pathname}${location.search}`}
                 onChange={(id) => update("categoryId", id)}
                 onRetry={retryCategories}
                 onPendingChange={setCategoryPending}
@@ -536,7 +533,6 @@ function SubscriptionFormEditor({
                 error={paymentMethodsError}
                 validationError={errors.paymentMethodId}
                 disabled={mutation.isPending}
-                manageFrom={`${location.pathname}${location.search}`}
                 onChange={(id) => update("paymentMethodId", id)}
                 onRetry={retryPaymentMethods}
                 onPendingChange={setPaymentMethodPending}
@@ -544,129 +540,151 @@ function SubscriptionFormEditor({
             </div>
           </section>
 
-          <section className="surface form-section reminder-section">
-            <div className="reminder-section__heading">
-              <IconBell size={21} aria-hidden="true" />
-              <div>
-                <h2>{t("form.emailReminder")}</h2>
-                <p>{t("form.emailReminderHelp")}</p>
+          {showReminderSection ? (
+            <section className="surface form-section reminder-section">
+              <div className="reminder-section__heading">
+                <IconBell size={21} aria-hidden="true" />
+                <div>
+                  <h2>{t("form.emailReminder")}</h2>
+                  <p>{t("form.emailReminderHelp")}</p>
+                </div>
               </div>
-            </div>
-            {!emailRemindersAvailable ? (
-              <InlineNotice tone="warning">
-                {subscription?.emailReminderEnabled
-                  ? t("form.reminderUnavailableRetained")
-                  : t("form.reminderUnavailable")}
-              </InlineNotice>
-            ) : null}
-            {account.emailReminderSystemSuspended ? (
-              <InlineNotice tone="danger">{t("form.reminderSystemSuspended")}</InlineNotice>
-            ) : account.emailRemindersPaused ? (
-              <InlineNotice tone="warning">{t("form.remindersPaused")}</InlineNotice>
-            ) : null}
-            <label className="checkbox-field checkbox-field--prominent">
-              <input
-                id={formFieldIds.emailReminderEnabled}
-                type="checkbox"
-                checked={form.emailReminderEnabled}
-                disabled={reminderToggleDisabled}
-                aria-invalid={errors.emailReminderEnabled ? true : undefined}
-                aria-describedby={
-                  errors.emailReminderEnabled
-                    ? `${formFieldIds.emailReminderEnabled}-error`
-                    : undefined
-                }
-                onChange={(event) => update("emailReminderEnabled", event.target.checked)}
-              />
-              <span>
-                <strong>{t("form.enableEmailReminder")}</strong>
-                <small>{t("form.enableEmailReminderHint")}</small>
-              </span>
-            </label>
-            {errors.emailReminderEnabled ? (
-              <span className="field__error" id={`${formFieldIds.emailReminderEnabled}-error`}>
-                {errors.emailReminderEnabled}
-              </span>
-            ) : null}
-
-            {form.emailReminderEnabled ? (
-              <div className="reminder-fields">
-                <Field
-                  label={t("form.reminderDestination")}
-                  hint={t("form.reminderDestinationHint")}
-                >
-                  <input value={account.email} readOnly disabled />
-                </Field>
-                <fieldset className="choice-fieldset">
-                  <legend>{t("form.reminderLeadTime")}</legend>
-                  <label>
+              {emailRemindersAvailable ? (
+                <>
+                  {form.emailReminderEnabled && account.emailReminderSystemSuspended ? (
+                    <InlineNotice tone="danger">{t("form.reminderSystemSuspended")}</InlineNotice>
+                  ) : form.emailReminderEnabled && account.emailRemindersPaused ? (
+                    <InlineNotice tone="warning">{t("form.remindersPaused")}</InlineNotice>
+                  ) : null}
+                  <label className="checkbox-field checkbox-field--prominent">
                     <input
-                      type="radio"
-                      name="emailReminderLeadMode"
-                      checked={!reminderLeadIsCustom}
-                      onChange={() => update("emailReminderDaysBefore", "")}
-                    />
-                    <span>
-                      <strong>
-                        {t("form.useAccountReminderDefault", {
-                          count: account.defaultEmailReminderDaysBefore,
-                        })}
-                      </strong>
-                      <small>{t("form.inheritsReminderDefault")}</small>
-                    </span>
-                  </label>
-                  <label>
-                    <input
-                      type="radio"
-                      name="emailReminderLeadMode"
-                      checked={reminderLeadIsCustom}
-                      onChange={() =>
-                        update(
-                          "emailReminderDaysBefore",
-                          String(account.defaultEmailReminderDaysBefore),
-                        )
+                      id={formFieldIds.emailReminderEnabled}
+                      type="checkbox"
+                      checked={form.emailReminderEnabled}
+                      disabled={mutation.isPending}
+                      aria-invalid={errors.emailReminderEnabled ? true : undefined}
+                      aria-describedby={
+                        errors.emailReminderEnabled
+                          ? `${formFieldIds.emailReminderEnabled}-error`
+                          : undefined
                       }
+                      onChange={(event) => update("emailReminderEnabled", event.target.checked)}
                     />
                     <span>
-                      <strong>{t("form.useCustomReminderLead")}</strong>
-                      <small>{t("form.customReminderLeadHint")}</small>
+                      <strong>{t("form.enableEmailReminder")}</strong>
+                      <small>{t("form.enableEmailReminderHint")}</small>
                     </span>
                   </label>
-                </fieldset>
-                {reminderLeadIsCustom ? (
-                  <Field
-                    id={formFieldIds.emailReminderDaysBefore}
-                    label={t("form.reminderDaysBefore")}
-                    hint={t("form.reminderDaysBeforeHint")}
-                    error={errors.emailReminderDaysBefore}
-                  >
-                    <input
-                      type="number"
-                      min={0}
-                      max={365}
-                      inputMode="numeric"
-                      value={form.emailReminderDaysBefore}
-                      onChange={(event) => update("emailReminderDaysBefore", event.target.value)}
-                    />
-                  </Field>
-                ) : null}
-                {reminderPreview ? (
-                  <div className="reminder-preview" role="status">
-                    <strong>{t("form.reminderPreviewTitle")}</strong>
-                    <p>
-                      {t("form.reminderPreview", {
-                        reminderDate: formatDate(reminderPreview.planningOn, i18n.language),
-                        localTime: account.emailReminderLocalTime,
-                        timeZone: account.timezone,
-                        billingDate: formatDate(reminderPreview.billingOn, i18n.language),
-                      })}
-                    </p>
-                    <small>{t("form.reminderEstimateDisclaimer")}</small>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </section>
+                  {errors.emailReminderEnabled ? (
+                    <span
+                      className="field__error"
+                      id={`${formFieldIds.emailReminderEnabled}-error`}
+                    >
+                      {errors.emailReminderEnabled}
+                    </span>
+                  ) : null}
+
+                  {form.emailReminderEnabled ? (
+                    <div className="reminder-fields">
+                      <Field
+                        label={t("form.reminderDestination")}
+                        hint={t("form.reminderDestinationHint")}
+                      >
+                        <p className="read-only-value">{account.email}</p>
+                      </Field>
+                      <fieldset className="choice-fieldset">
+                        <legend>{t("form.reminderLeadTime")}</legend>
+                        <label>
+                          <input
+                            type="radio"
+                            name="emailReminderLeadMode"
+                            checked={!reminderLeadIsCustom}
+                            onChange={() => update("emailReminderDaysBefore", "")}
+                          />
+                          <span>
+                            <strong>
+                              {t("form.useAccountReminderDefault", {
+                                count: account.defaultEmailReminderDaysBefore,
+                              })}
+                            </strong>
+                            <small>{t("form.inheritsReminderDefault")}</small>
+                          </span>
+                        </label>
+                        <label>
+                          <input
+                            type="radio"
+                            name="emailReminderLeadMode"
+                            checked={reminderLeadIsCustom}
+                            onChange={() =>
+                              update(
+                                "emailReminderDaysBefore",
+                                String(account.defaultEmailReminderDaysBefore),
+                              )
+                            }
+                          />
+                          <span>
+                            <strong>{t("form.useCustomReminderLead")}</strong>
+                            <small>{t("form.customReminderLeadHint")}</small>
+                          </span>
+                        </label>
+                      </fieldset>
+                      {reminderLeadIsCustom ? (
+                        <Field
+                          id={formFieldIds.emailReminderDaysBefore}
+                          label={t("form.reminderDaysBefore")}
+                          hint={t("form.reminderDaysBeforeHint")}
+                          error={errors.emailReminderDaysBefore}
+                        >
+                          <input
+                            type="number"
+                            min={0}
+                            max={365}
+                            inputMode="numeric"
+                            value={form.emailReminderDaysBefore}
+                            onChange={(event) =>
+                              update("emailReminderDaysBefore", event.target.value)
+                            }
+                          />
+                        </Field>
+                      ) : null}
+                      {reminderPreview ? (
+                        <div className="reminder-preview" role="status">
+                          <strong>{t("form.reminderPreviewTitle")}</strong>
+                          <p>
+                            {t("form.reminderPreview", {
+                              reminderDate: formatDate(reminderPreview.planningOn, i18n.language),
+                              localTime: account.emailReminderLocalTime,
+                              timeZone: account.timezone,
+                              billingDate: formatDate(reminderPreview.billingOn, i18n.language),
+                            })}
+                          </p>
+                          <small>{t("form.reminderEstimateDisclaimer")}</small>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="reminder-section__saved-state">
+                  <p role="status">
+                    {form.emailReminderEnabled
+                      ? t("form.savedReminderUnavailable")
+                      : t("form.reminderWillTurnOff")}
+                  </p>
+                  {form.emailReminderEnabled ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => update("emailReminderEnabled", false)}
+                      disabled={mutation.isPending}
+                    >
+                      {t("form.turnOffReminder")}
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+            </section>
+          ) : null}
 
           <section className="surface form-section form-section--advanced">
             <details>

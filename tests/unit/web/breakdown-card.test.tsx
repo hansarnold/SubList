@@ -1,18 +1,9 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { FxStatus } from "../../../src/shared/api-types";
 import { BreakdownCard, BreakdownTooltip } from "../../../src/web/features/dashboard/BreakdownCard";
 import i18n from "../../../src/web/i18n";
-
-const noFx: FxStatus = {
-  state: "not_needed",
-  provider: null,
-  rateDate: null,
-  fetchedAt: null,
-  missingCurrencies: [],
-};
 
 beforeEach(async () => {
   localStorage.clear();
@@ -22,13 +13,14 @@ beforeEach(async () => {
 afterEach(() => cleanup());
 
 describe("Dashboard breakdown card", () => {
-  it("switches between amount-based bar and donut views and remembers the choice", async () => {
+  it("shows separate amount and share charts with one authoritative table", () => {
+    localStorage.setItem("legacy-breakdown-view", "donut");
     render(
       <BreakdownCard
         title="Category breakdown"
-        storageKey="test-breakdown"
+        barTitle="Category amounts"
+        pieTitle="Category share"
         currency="USD"
-        fx={noFx}
         locale="en"
         items={[
           {
@@ -52,23 +44,35 @@ describe("Dashboard breakdown card", () => {
       />,
     );
 
-    const bars = screen.getByRole("button", { name: "Bars" });
-    const donut = screen.getByRole("button", { name: "Donut" });
-    expect(bars.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(donut);
-    expect(donut.getAttribute("aria-pressed")).toBe("true");
-    await waitFor(() => expect(localStorage.getItem("test-breakdown")).toBe("donut"));
-    expect(screen.getByRole("group", { name: /Category breakdown.*Donut/ })).toBeTruthy();
-    expect(screen.queryByRole("img", { name: /Category breakdown.*Donut/ })).toBeNull();
+    expect(
+      screen.getByRole("group", {
+        name: "Category amounts, bar chart of estimated monthly averages in USD",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("group", {
+        name: "Category share, pie chart of estimated monthly-average share in USD",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /bar|pie|donut/i })).toBeNull();
+    expect(localStorage.length).toBe(1);
+    expect(localStorage.getItem("legacy-breakdown-view")).toBe("donut");
+
+    const table = screen.getByRole("table", {
+      name: "Complete estimated monthly-average values for Category breakdown in USD",
+    });
+    expect(within(table).getByRole("columnheader", { name: "Group" })).toBeTruthy();
+    expect(within(table).getByRole("rowheader", { name: "Productivity" })).toBeTruthy();
+    expect(within(table).getByText("66.7%")).toBeTruthy();
   });
 
-  it("uses a 100% value state and retains the complete original-currency list", () => {
+  it("renders both charts and a 100% pie for one positive group", () => {
     render(
       <BreakdownCard
         title="Category breakdown"
-        storageKey="test-breakdown"
+        barTitle="Category amounts"
+        pieTitle="Category share"
         currency="USD"
-        fx={noFx}
         locale="en"
         items={[
           {
@@ -87,20 +91,24 @@ describe("Dashboard breakdown card", () => {
       />,
     );
 
-    expect(screen.getByText("100% of this estimate")).toBeTruthy();
-    const original = screen.getByRole("list", { name: "Original-currency monthly estimates" });
+    expect(screen.getByRole("group", { name: /Category amounts, bar chart/ })).toBeTruthy();
+    expect(screen.getByRole("group", { name: /Category share, pie chart/ })).toBeTruthy();
+    const table = screen.getByRole("table", { name: /Category breakdown/ });
+    expect(within(table).getByText("100%")).toBeTruthy();
+    const original = within(table).getByRole("list", {
+      name: "Original-currency monthly estimates for Productivity",
+    });
     expect(within(original).getByText("CNY")).toBeTruthy();
     expect(within(original).getByText("USD")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Donut" })).toBeNull();
   });
 
-  it("does not substitute counts when conversion is unavailable", () => {
+  it("uses one section-level incomplete-conversion state and preserves the table", () => {
     render(
       <BreakdownCard
         title="Payment method breakdown"
-        storageKey="test-payment-breakdown"
+        barTitle="Payment method amounts"
+        pieTitle="Payment method share"
         currency="CNY"
-        fx={{ ...noFx, state: "unavailable", missingCurrencies: ["USD"] }}
         locale="en"
         items={[
           {
@@ -116,9 +124,29 @@ describe("Dashboard breakdown card", () => {
       />,
     );
 
-    expect(screen.getAllByText("Not set").length).toBeGreaterThan(0);
-    expect(screen.getByText("$40.00")).toBeTruthy();
-    expect(screen.queryByRole("group", { name: /Payment method breakdown.*Bars/ })).toBeNull();
+    expect(screen.getByText(/Amount charts are unavailable/)).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /bar chart|pie chart/ })).toBeNull();
+    const table = screen.getByRole("table", { name: /Payment method breakdown/ });
+    expect(within(table).getAllByText("Unavailable")).toHaveLength(2);
+    expect(within(table).getByText("$40.00")).toBeTruthy();
+  });
+
+  it("uses one compact section state when there is no breakdown data", () => {
+    render(
+      <BreakdownCard
+        title="Category breakdown"
+        barTitle="Category amounts"
+        pieTitle="Category share"
+        currency="USD"
+        locale="en"
+        items={[]}
+        renderSymbol={() => null}
+      />,
+    );
+
+    expect(screen.getByText("Add an active subscription to see this breakdown.")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: /bar chart|pie chart/ })).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("announces keyboard tooltip changes politely and atomically", () => {

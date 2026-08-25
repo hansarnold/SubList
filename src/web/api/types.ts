@@ -20,7 +20,7 @@ export type {
   ImportPreview,
   ImportResult,
   ImportWarning,
-  OpenSubListsArchiveV3,
+  OpenSubListsArchiveV4,
   PaymentMethod,
   PaymentMethodBreakdown,
   PaymentMethodKind,
@@ -42,7 +42,8 @@ export type UpdateUserInput = Partial<
     | "displayName"
     | "timezone"
     | "reportingCurrency"
-    | "preferredLocale"
+    | "interfaceLocale"
+    | "emailLocale"
     | "defaultEmailReminderDaysBefore"
     | "emailReminderLocalTime"
     | "emailRemindersPaused"

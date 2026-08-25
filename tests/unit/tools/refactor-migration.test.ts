@@ -7,8 +7,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { OpenSubListsService } from "../../../src/application/service";
 import type { OpenSubListsRepository } from "../../../src/application/ports";
-import type { OpenSubListsArchiveV3 } from "../../../src/shared/api-types";
-import { archiveV2Schema, archiveV3Schema } from "../../../src/shared/api-types/schemas";
+import type { OpenSubListsArchiveV3, OpenSubListsArchiveV4 } from "../../../src/shared/api-types";
+import {
+  archiveV2Schema,
+  archiveV3Schema,
+  archiveV4Schema,
+} from "../../../src/shared/api-types/schemas";
 // @ts-expect-error The operator tool is intentionally plain JavaScript outside the app TS build.
 import * as untypedReminderMigration from "../../../tools/reminder-migration/index.js";
 // @ts-expect-error The operator tool is intentionally plain JavaScript outside the app TS build.
@@ -19,8 +23,9 @@ type MigrationError = Error & {
   issues: ReadonlyArray<{ path: string; message: string }>;
 };
 
-const { transformArchiveV2 } = untypedReminderMigration as unknown as {
+const { transformArchiveV2, transformArchiveV3 } = untypedReminderMigration as unknown as {
   transformArchiveV2: (sourceText: string) => OpenSubListsArchiveV3;
+  transformArchiveV3: (sourceText: string) => OpenSubListsArchiveV4;
 };
 
 type ResourceSymbol = { type: "icon" | "emoji"; value: string } | null;
@@ -172,9 +177,10 @@ describe("the one-time archive v1 to v2 transformer", () => {
     expect(result.reviewCsv).toContain(`Visa [${PAYMENT_METHOD_ID}]`);
   });
 
-  it("emits canonical v2 that upgrades offline to the current runtime archive", async () => {
+  it("emits canonical V2 that upgrades offline through V3 to the current V4 archive", async () => {
     const result = transformArchiveV1(sourceText());
-    const upgraded = transformArchiveV2(JSON.stringify(result.archive));
+    const upgradedV3 = transformArchiveV2(JSON.stringify(result.archive));
+    const upgradedV4 = transformArchiveV3(JSON.stringify(upgradedV3));
     const runtime = new OpenSubListsService({
       getImportState: () =>
         Promise.resolve({
@@ -188,15 +194,20 @@ describe("the one-time archive v1 to v2 transformer", () => {
     } as unknown as OpenSubListsRepository);
 
     expect(archiveV2Schema.safeParse(result.archive).success).toBe(true);
-    expect(archiveV3Schema.safeParse(upgraded).success).toBe(true);
+    expect(archiveV3Schema.safeParse(upgradedV3).success).toBe(true);
+    expect(upgradedV3.profile.preferredLocale).toBe("en");
+    expect(upgradedV3.subscriptions.every((value) => !value.emailReminderEnabled)).toBe(true);
+    expect(archiveV4Schema.safeParse(upgradedV4).success).toBe(true);
+    expect(upgradedV4.profile).toMatchObject({ interfaceLocale: "en", emailLocale: "en" });
+    expect("preferredLocale" in upgradedV4.profile).toBe(false);
     await expect(
       runtime.previewImport("migration-rehearsal-user", {
-        archive: upgraded,
+        archive: upgradedV4,
         conflictStrategy: "skip",
         importProfile: false,
       }),
     ).resolves.toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       counts: { categories: 1, paymentMethods: 1, subscriptions: 3 },
       reminderImpact: { enabledPreferencesAfterApply: 0 },
     });

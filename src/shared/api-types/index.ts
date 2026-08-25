@@ -31,7 +31,8 @@ export type User = {
   timezone: string;
   reportingCurrency: string;
   onboardingCompletedAt: string | null;
-  preferredLocale: "en" | "zh-Hans";
+  interfaceLocale: "en" | "zh-Hans";
+  emailLocale: "en" | "zh-Hans";
   defaultEmailReminderDaysBefore: number;
   emailReminderLocalTime: string;
   emailRemindersPaused: boolean;
@@ -188,6 +189,31 @@ export type Dashboard = {
   paymentMethodBreakdown: PaymentMethodBreakdown[];
 };
 
+export type OpenSubListsArchiveV4 = {
+  format: "opensublists";
+  schemaVersion: 4;
+  archiveId: string;
+  exportedAt: string;
+  generator: {
+    name: "OpenSubLists";
+    version: string;
+  };
+  profile: {
+    displayName: string | null;
+    timezone: string;
+    reportingCurrency: string;
+    interfaceLocale: "en" | "zh-Hans";
+    emailLocale: "en" | "zh-Hans";
+    defaultEmailReminderDaysBefore: number;
+    emailReminderLocalTime: string;
+    emailRemindersPaused: boolean;
+  };
+  categories: Category[];
+  paymentMethods: PaymentMethod[];
+  subscriptions: Array<Omit<Subscription, "nextBillingOn">>;
+};
+
+/** Offline locale-migration input only. The HTTP API accepts schema version 4 exclusively. */
 export type OpenSubListsArchiveV3 = {
   format: "opensublists";
   schemaVersion: 3;
@@ -211,7 +237,7 @@ export type OpenSubListsArchiveV3 = {
   subscriptions: Array<Omit<Subscription, "nextBillingOn">>;
 };
 
-/** Offline migration input only. The HTTP API accepts schema version 3 exclusively. */
+/** Offline migration input only. */
 export type OpenSubListsArchiveV2 = {
   format: "opensublists";
   schemaVersion: 2;
@@ -247,7 +273,7 @@ export type ImportWarning = {
 
 export type ImportPreview = {
   digest: string;
-  schemaVersion: 3;
+  schemaVersion: 4;
   counts: {
     categories: number;
     paymentMethods: number;

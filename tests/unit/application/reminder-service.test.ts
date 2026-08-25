@@ -129,18 +129,25 @@ describe("renewal reminder delivery summary", () => {
 });
 
 describe("renewal reminder claim boundary", () => {
-  it("sends only the fresh candidate returned by the atomic claim", async () => {
+  it("sends only the fresh candidate returned by the atomic claim using its email locale", async () => {
     const oldCandidate = candidateFixture("old@example.test", "Old name");
-    const freshCandidate = candidateFixture("fresh@example.test", "Fresh name", {
-      attemptCount: 1,
-      status: "sending",
-      claimedAt: now,
-      leaseExpiresAt: now + 900_000,
-      applicationIdempotencyKey: "renewal:fresh",
-      providerKey: "fake",
-      providerConfigRevision: 1,
-      templateVersion: 1,
-    });
+    const freshCandidate = {
+      ...candidateFixture("fresh@example.test", "Fresh name", {
+        attemptCount: 1,
+        status: "sending",
+        claimedAt: now,
+        leaseExpiresAt: now + 900_000,
+        applicationIdempotencyKey: "renewal:fresh",
+        providerKey: "fake",
+        providerConfigRevision: 1,
+        templateVersion: 1,
+      }),
+      user: userFixture({
+        primaryEmail: "fresh@example.test",
+        interfaceLocale: "en",
+        emailLocale: "zh-Hans",
+      }),
+    };
     const sent: ReminderEmailEnvelope[] = [];
     const sender: EmailSender = {
       send(envelope) {
@@ -175,6 +182,7 @@ describe("renewal reminder claim boundary", () => {
       applicationIdempotencyKey: "renewal:fresh",
     });
     expect(sent[0]?.subject).toContain("Fresh name");
+    expect(sent[0]?.subject).toContain("预计续费提醒");
     expect(sent[0]?.subject).not.toContain("Old name");
   });
 
@@ -294,7 +302,8 @@ function userFixture(patch: Partial<AppUser> = {}): AppUser {
     timezone: "UTC",
     reportingCurrency: "USD",
     onboardingCompletedAt: null,
-    preferredLocale: "en",
+    interfaceLocale: "en",
+    emailLocale: "en",
     defaultEmailReminderDaysBefore: 7,
     emailReminderLocalTime: "09:00",
     emailRemindersPaused: false,

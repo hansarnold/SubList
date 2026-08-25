@@ -341,21 +341,32 @@ export function SubscriptionDetailPage() {
         {!subscription.emailReminderEnabled ? (
           <div className="reminder-detail__empty">
             <p>{t("detail.reminderOffHelp")}</p>
-            <Link
-              className="button button--secondary"
-              to={`/subscriptions/${subscription.id}/edit`}
-            >
-              {t("detail.configureReminder")}
-            </Link>
+            {session.capabilities.emailReminders ? (
+              <Link
+                className="button button--secondary"
+                to={`/subscriptions/${subscription.id}/edit`}
+              >
+                {t("detail.configureReminder")}
+              </Link>
+            ) : null}
           </div>
         ) : (
           <>
-            {!session.capabilities.emailReminders ? (
-              <InlineNotice tone="warning">{t("detail.reminderUnavailable")}</InlineNotice>
-            ) : account.emailReminderSystemSuspended ? (
+            {session.capabilities.emailReminders && account.emailReminderSystemSuspended ? (
               <InlineNotice tone="danger">{t("detail.reminderSystemSuspended")}</InlineNotice>
-            ) : account.emailRemindersPaused ? (
+            ) : session.capabilities.emailReminders && account.emailRemindersPaused ? (
               <InlineNotice tone="warning">{t("detail.remindersPaused")}</InlineNotice>
+            ) : null}
+            {!session.capabilities.emailReminders ? (
+              <div className="reminder-section__saved-state">
+                <p>{t("detail.savedReminderUnavailable")}</p>
+                <Link
+                  className="button button--secondary"
+                  to={`/subscriptions/${subscription.id}/edit`}
+                >
+                  {t("form.turnOffReminder")}
+                </Link>
+              </div>
             ) : null}
             <dl className="detail-list reminder-detail__list">
               <div>

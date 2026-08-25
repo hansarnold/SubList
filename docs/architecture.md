@@ -1,8 +1,10 @@
 # OpenSubLists Architecture and Technology Decisions
 
-> Status: Implemented baseline, reporting refactor, and provider-gated renewal email
+> Status: Implemented baseline, reporting refactor, provider-gated renewal email, and
+> Phase 5 locale/resource/chart presentation; production email activation remains an
+> operator action
 >
-> Last updated: 2026-08-24
+> Last updated: 2026-08-25
 >
 > Deployment target: Cloudflare Workers and D1
 
@@ -233,6 +235,15 @@ uses the native Cloudflare `send_email` binding with verified destinations. Prov
 configuration is optional, and its absence becomes a non-secret runtime capability
 rather than a startup failure for the core application.
 
+Phase 5 keeps this boundary and the one-Worker design. The authenticated user contract
+now exposes `interfaceLocale` and `emailLocale` independently; envelope rendering reads
+only `emailLocale`, while an interface-only change does not advance the reminder
+revision. Ordinary Profile presentation omits unavailable-provider warnings without
+weakening server capability checks. The still operator-gated activation sequence
+remains fake sender, manual local no-send invocation, normal production no-send Cron,
+then one verified operator delivery. See
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
+
 The import application service receives that non-secret capability explicitly for the
 reminder-capable archive version. Preview computes structured reminder impact for the
 selected merge options; confirmation recomputes the actual merged enabled count and
@@ -288,7 +299,8 @@ No environment binding is read directly from domain modules.
 - Avoid Node.js APIs unless a dependency requires them and the compatibility flag is documented.
 - Domain code uses standard TypeScript and web-platform primitives.
 - SQL remains valid for D1's supported SQLite subset.
-- Export data is independent of D1 row layout.
+- Export data is independent of D1 row layout. The current runtime exports and imports
+  archive schema V4 only; V3 is accepted only by the offline locale transformer.
 - While the deployment has one maintainer, the runtime supports only the current application database and archive shape. Approved breaking refactors use an offline export, deterministic transformation, verification report, fresh D1 target, and preserved rollback database rather than dual-read compatibility.
 
 ## 12. Change Triggers

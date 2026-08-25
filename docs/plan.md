@@ -1,13 +1,14 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: MVP deployed; Phase 4 implemented locally with provider and publication
-> rollout still operator-gated
+> Status: MVP and Phase 4 deployed; Phase 5 is implemented and migration 0007 is
+> applied in production, while the Phase 5 Worker rollout and email activation remain
+> operator-gated
 >
-> Last updated: 2026-08-24
+> Last updated: 2026-08-25
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phases 3 and 4 are implemented; GitHub Pages publication and production email activation remain operator actions
+> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phase 5 Worker rollout and email activation remain operator actions
 
 ## 1. Project Overview
 
@@ -48,6 +49,8 @@ Sign in → Review subscriptions → Add or edit → Review upcoming charges and
 - Invite-only email authentication.
 - Create, read, edit, archive, and delete subscriptions.
 - Categories and payment methods.
+- A category overview that groups active subscriptions without mixing browsing and
+  category management.
 - Daily, weekly, monthly, and yearly billing intervals with interval multipliers.
 - Next billing date calculation.
 - Monthly average, annualized, category, and upcoming-charge summaries.
@@ -59,11 +62,12 @@ Sign in → Review subscriptions → Add or edit → Review upcoming charges and
 - Explicit per-subscription renewal email with an account lead-time default and
   optional subscription override (Phase 4 provider-gated).
 - Allow-listed common icons or one emoji for categories, payment methods, and subscriptions.
-- Amount-based category and payment-method breakdowns with Bar and Donut views.
+- Amount-based category and payment-method breakdowns with simultaneously visible Bar
+  and Pie views.
 - JSON import and export.
 - One responsive website for narrow and wide browser viewports.
-- A self-hosting documentation build for the repository's default GitHub Pages URL;
-  publication remains an operator action.
+- A published self-hosting documentation site at the repository's default GitHub
+  Pages URL.
 
 ### 3.2 Excluded from the MVP
 
@@ -185,13 +189,14 @@ The application does not cache authorization decisions by default. User roles an
 
 ## 7. Core Data Model
 
-The current schema uses seven `STRICT` D1 tables:
+The current schema uses eight `STRICT` D1 tables:
 
 - `users`
 - `auth_identities`
 - `categories`
 - `payment_methods`
 - `subscriptions`
+- `renewal_email_deliveries`
 - `fx_snapshot`
 - `fx_rates`
 
@@ -199,8 +204,8 @@ External authentication identities are separate from stable application users. E
 
 The migration-ready DDL, indexes, constraints, normalization rules, and extension paths are defined in [Data Model](./data-model.md).
 
-The provider-gated reminder phase plans additive account and subscription preference
-fields plus a `renewal_email_deliveries` table. Existing and imported subscriptions
+The provider-gated reminder implementation adds account and subscription preference
+fields plus the `renewal_email_deliveries` table. Existing and migrated subscriptions
 remain opted out. The delivery uniqueness key is the user, subscription, and billing
 occurrence so changing lead days cannot send a second email for the same occurrence.
 
@@ -223,19 +228,33 @@ lead time equals or exceeds a short recurrence interval.
 
 ## 10. Pages and User Flows
 
-The MVP is a responsive website only; there are no native macOS or iOS clients. It includes Dashboard, Subscriptions, and Settings. It uses sidebar navigation at wide browser widths and bottom navigation at narrow widths. The visible English label for the Dashboard route is Overview. Its wide-browser view leads with combined reporting-currency estimates and rate metadata, then preserves the next charge, grouped renewal agenda, original-currency breakdown, and category summary. Category onboarding offers a reviewed preset bundle; category and payment settings offer localized templates; all three resource editors share an accessible common-icon and emoji picker. The wide-browser Subscriptions route retains a responsive card grid with an optional compact list view, search, sorting, and tenant-scoped filters.
+The MVP is a responsive website only; there are no native macOS or iOS clients. Its
+Phase 5 route set includes Dashboard, Categories, Subscriptions, and Settings. It uses
+sidebar navigation at wide browser widths and bottom navigation at narrow widths. The
+visible English label for the Dashboard route is Overview. Its wide-browser view
+leads with combined reporting-currency estimates and rate metadata, then preserves
+the next charge, grouped renewal agenda, original-currency breakdown, and category
+summary. The Categories route groups active subscriptions into information-dense,
+image-free cards and reuses the filtered Subscriptions route for drill-down;
+category CRUD remains in Settings. Category onboarding offers a reviewed preset
+bundle; category and payment settings offer localized templates; all three resource
+editors share an accessible common-icon and emoji picker. The wide-browser
+Subscriptions route retains a responsive card grid with an optional compact list
+view, search, sorting, and tenant-scoped filters.
 
 The implemented Phase 4 follow-up makes those same category and payment-method
-templates available directly from subscription Create and Edit. It also adds
-mathematically consistent Bar and Donut views for estimated category and
-payment-method composition and builds the canonical self-hosting guide for GitHub
-Pages without a custom documentation domain. Publication remains an operator action.
+templates available directly from subscription Create and Edit. It also adds the
+first mathematically consistent Bar and Donut views for estimated category and
+payment-method composition and publishes the canonical self-hosting guide through
+GitHub Pages without a custom documentation domain.
 
-The provider-gated email follow-up adds an explicit reminder toggle to Subscription
+The provider-gated email follow-up added an explicit reminder toggle to Subscription
 Create and Edit, an inherited-or-overridden lead time, a calculated reminder preview,
-and account settings for the default lead time, local delivery time, persisted email
-locale, and a global pause. It never infers opt-in from amount, currency, payment
-method, or a manual-renewal label.
+and account settings for the default lead time, local delivery time, and a global
+pause. Phase 5 adds independent interface and email locales, removes non-actionable
+unavailable-provider UI, simplifies resource creation copy, and renders Bar and Pie
+charts separately. Neither phase infers opt-in from amount, currency, payment method,
+or a manual-renewal label.
 
 Responsive behavior, lifecycle actions, accessibility, localization, empty states, and acceptance flows are defined in [MVP UI Flow](./ui-flow.md).
 
@@ -247,7 +266,11 @@ Endpoints, payloads, errors, request limits, security headers, and contract test
 
 ## 12. Migration from SubList
 
-OpenSubLists uses a user-owned JSON archive. A legacy v1-to-v2 operator cutover uses a one-purpose local transformer and a new D1 database rather than permanent runtime support for the old archive or database shape. Native SubList migration remains an adapter into the current archive model and never writes directly to D1.
+OpenSubLists uses a user-owned JSON archive. The runtime exports and imports schema V4
+only. Legacy V1-to-V2, V2-to-V3, and V3-to-V4 changes use one-purpose offline
+transformers rather than permanent runtime compatibility for old archive or database
+shapes. Native SubList migration remains an adapter into the current archive model and
+never writes directly to D1.
 
 The archive schema, conflict strategies, security model, validation pipeline, and native mapping policy are defined in [Import and Export](./import-export.md).
 
@@ -312,13 +335,13 @@ Completion criterion: The Dashboard provides complete reporting-currency estimat
 
 The detailed implementation order and cutover gates are defined in [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md).
 
-### Phase 4: Self-service Workflow and Friend Preview — Implemented Locally
+### Phase 4: Self-service Workflow and Friend Preview — Deployed
 
 - [x] Add first-run setup guidance.
 - [x] Expose existing, preset-created, and custom categories directly in subscription Create and Edit.
 - [x] Expose existing, preset-created, and custom payment methods directly in subscription Create and Edit.
 - [x] Correct the category breakdown metric and add accessible Bar and Donut views for category and payment-method estimates.
-- [ ] Publish the self-hosting guide from this repository through the default GitHub Pages project URL without a custom domain.
+- [x] Publish the self-hosting guide from this repository through the default GitHub Pages project URL without a custom domain.
 - [x] Provider-gated: add explicit per-subscription renewal email, D1 delivery
       idempotency and retries, persisted locale, an hourly Cron, and the Cloudflare email
       adapter. Production sender and recipient verification remain disabled operator
@@ -341,7 +364,39 @@ real mailbox.
 The detailed delivery sequence and acceptance gates are defined in
 [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
 
-### Phase 5: Demand-driven Enhancements
+### Phase 5: UX Simplification, Locale Separation, Email Activation, and Charts — Implemented Locally; Rollout Gated
+
+- [x] Separate Interface language and Email language without mismatch warnings or
+      copy-language actions.
+- [x] Replace user-facing preset terminology, sparse template walls, checkboxes, and
+      ambiguous operations with compact Saved, Common, Create, and Add-and-select
+      flows.
+- [x] Add a top-level category overview with useful grouped subscription previews,
+      image-free category identity, filtered-list drill-down, and separate Settings
+      management.
+- [x] Remove non-actionable provider notices and controls from ordinary Profile and
+      Subscription screens.
+- [x] Show separate Bar and Pie charts for category and payment-method estimates,
+      including valid one-group data.
+- [x] Migrate the repository contract to explicit interface and email fields, runtime
+      archive V4, migration 0007, and a strict offline V3-to-V4 transformer.
+- [x] Record an exact production recovery point, apply migration 0007 to the hosted
+      D1 database, and verify unchanged tenant-row counts plus the locale backfill.
+- [ ] Transform and review any retained private V3 archive before it is needed for a
+      future import or transfer; never commit the source or transformed copy.
+- [ ] Activate the existing native email adapter first for one verified operator
+      destination, then for individually verified friend destinations.
+
+Completion criterion: ordinary subscription organization no longer exposes preset
+mechanics or dead controls; category browsing is informative and distinct from
+management; the two locales are independent; all valid breakdowns show both requested
+chart shapes; and the verified-destination email rollout passes the manual no-send and
+operator-only delivery gates.
+
+The implemented corrective behavior, rollout order, and acceptance criteria are defined
+in [UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
+
+### Phase 6: Demand-driven Enhancements
 
 - Price history and pause periods.
 - Actual transaction tracking only if the product stops being an estimate-only ledger.
@@ -415,28 +470,40 @@ The following do not block the first hosted deployment:
 - Renewal email is an explicit per-subscription opt-in. The account default never
   enables it, and amount, currency, payment method, or manual-renewal heuristics do not
   affect eligibility.
+- Renewal email always targets the current Cloudflare Access account email. The
+  application has no editable recipient, alternate address, or per-subscription
+  recipient override.
 - The reminder scheduler uses an independent hourly Cron, authoritative
   recurrence projection, the current verified primary email, original-currency
   values, and a D1 delivery ledger unique per billing occurrence.
 - The initial production email adapter targets Cloudflare's native `send_email`
   binding and verified destination addresses. Deployments without a configured sender
-  advertise the capability as unavailable. Ambiguous native-provider results become
-  visible terminal `unknown` states rather than automatic retries, and Queue adoption
-  remains evidence-driven.
+  expose the capability as unavailable to application logic; normal screens omit the
+  resulting unusable controls and global warning. Ambiguous
+  native-provider results become visible terminal `unknown` states rather than
+  automatic retries, and Queue adoption remains evidence-driven.
 - Money is stored as integer micro-units.
 - Subscription lifecycle state is active or cancelled; archiving is independent and is the default removal action.
 - Pause periods and price history are deferred to dedicated tables.
 - The API base path is `/api/v1`.
 - The Dashboard API returns projected occurrence records, not subscription rows, so short recurrence intervals are counted correctly.
-- The Phase 4 Dashboard charts visualize reporting-currency estimates
-  only when conversion is complete and always retain an accessible
-  original-currency disclosure.
-- The Phase 4 public self-hosting guide is built from the same GitHub repository for
-  the default GitHub Pages project URL with no `CNAME` or custom domain. Publication
-  requires the repository owner to enable GitHub Actions as the Pages source.
+- Dashboard charts visualize reporting-currency estimates only when conversion is
+  complete, show separate Bar and Pie views including one-group data, and always
+  retain an accessible original-currency disclosure.
+- The public self-hosting guide is published from the same GitHub repository at the
+  default GitHub Pages project URL with no `CNAME` or custom domain.
 - The personal MVP caps each account at 50 subscriptions and dashboard occurrence expansion at a 30-day window.
 - The product is one responsive website; native desktop and mobile clients are outside the MVP.
 - Initial UI locales are English and Simplified Chinese.
+- Interface language and renewal-email language are separate preferences. A
+  difference between them is valid and never produces a warning.
+- `Preset` remains an internal creation-template concept. User-facing copy
+  names saved resources, common choices, creation, and the final add/select result.
+- `/categories` is an image-free browsing route and category CRUD remains
+  at `/settings/categories`; selecting a group reuses the existing Subscriptions
+  category filter rather than adding a category-detail API.
+- Bar and Pie estimates are separate simultaneous visualizations and both still render
+  for a one-group breakdown.
 - Date rules and tenant isolation require automated tests before substantial UI development.
 
 ## 19. Official References

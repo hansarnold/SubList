@@ -1,7 +1,8 @@
 # OpenSubLists API Contract
 
-> Status: Implemented baseline, reporting refactor, and provider-gated renewal email
-> Last updated: 2026-08-24
+> Status: Implemented baseline, reporting refactor, provider-gated renewal email, and
+> Phase 5 locale split; production email activation remains operator-gated
+> Last updated: 2026-08-25
 > Base path: `/api/v1`  
 > Format: JSON over same-origin HTTPS
 
@@ -183,7 +184,8 @@ type User = {
   timezone: string;
   reportingCurrency: string;
   onboardingCompletedAt: string | null;
-  preferredLocale: "en" | "zh-Hans";
+  interfaceLocale: "en" | "zh-Hans";
+  emailLocale: "en" | "zh-Hans";
   defaultEmailReminderDaysBefore: number;
   emailReminderLocalTime: string;
   emailRemindersPaused: boolean;
@@ -274,7 +276,7 @@ type Subscription = {
 
 ```ts
 type RenewalEmailUserPreference = {
-  preferredLocale: "en" | "zh-Hans";
+  emailLocale: "en" | "zh-Hans";
   defaultEmailReminderDaysBefore: number;
   emailReminderLocalTime: string;
   emailRemindersPaused: boolean;
@@ -314,10 +316,21 @@ type SessionCapabilities = {
 The capability reports whether the deployment has an enabled sender path. It does not
 expose provider, sender-domain, recipient-verification, or secret details.
 
-`PATCH /api/v1/me` accepts the four editable account preference fields, never
-`emailReminderSystemSuspended`. Setting `emailRemindersPaused: false` while the sender
-capability is unavailable returns `409 EMAIL_REMINDERS_UNAVAILABLE`; doing so while a
-system suspension exists returns `409 EMAIL_REMINDERS_SUSPENDED`.
+`PATCH /api/v1/me` accepts independent `interfaceLocale` and `emailLocale` fields
+alongside the editable account reminder preferences, but never
+`emailReminderSystemSuspended`. Interface-language changes do not advance reminder
+revisions; email-language changes do. Setting `emailRemindersPaused: false` while the
+sender capability is unavailable returns `409 EMAIL_REMINDERS_UNAVAILABLE`; doing so
+while a system suspension exists returns `409 EMAIL_REMINDERS_SUSPENDED`. The
+non-secret capability and provider-gated write rules remain application contracts
+even though the normal UI omits unusable controls and global provider warnings. See
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
+
+The reminder recipient is never an API input. Delivery always resolves the current
+authenticated user's server-owned `primary_email`; user, subscription, and archive
+payloads expose no recipient override. A login-email change is an identity/operator
+workflow and keeps delivery paused until the same address is verified and allowed by
+the configured provider binding.
 
 Subscription create and patch accept the two subscription fields, preserving the
 distinction between omitted, `null`, and `false`. Capability gating applies to create
@@ -396,7 +409,9 @@ Request:
 {
   "displayName": "Example User",
   "timezone": "Asia/Shanghai",
-  "reportingCurrency": "CNY"
+  "reportingCurrency": "CNY",
+  "interfaceLocale": "zh-Hans",
+  "emailLocale": "en"
 }
 ```
 
@@ -674,7 +689,8 @@ Estimates are rounded only at the response boundary.
 
 Returns a versioned JSON archive with a download content disposition. Profile and
 tenant resources are read from one consistent D1 batch snapshot. The exact format is
-defined in `import-export.md`.
+defined in `import-export.md`. The runtime exports and imports schema V4 only; a V3
+archive must be transformed offline before it is submitted to either import route.
 
 ### `POST /api/v1/imports/preview`
 
@@ -788,5 +804,5 @@ Required integration tests cover:
 - Category batch-create atomicity and normalized-name conflicts.
 - Icon-token allow-list and single-grapheme emoji validation on every symbol-bearing resource.
 - Reminder contract coverage includes `null = inherit`, explicit opt-in,
-  account pause, capability-unavailable behavior, `0..365` bounds, persisted locale,
-  and independent partial-update semantics.
+  account pause, capability-unavailable behavior, `0..365` bounds, independent
+  interface and email locales, and independent partial-update semantics.

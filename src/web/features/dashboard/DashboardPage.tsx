@@ -355,9 +355,9 @@ export function DashboardPage() {
           <div className="breakdown-grid">
             <BreakdownCard
               title={t("dashboard.categoryBreakdown")}
-              storageKey="opensublists-category-breakdown-view"
+              barTitle={t("dashboard.categoryAmounts")}
+              pieTitle={t("dashboard.categoryShare")}
               currency={data.reporting.currency}
-              fx={data.reporting.fx}
               locale={i18n.language}
               items={data.categoryBreakdown.map((item) => ({
                 key: item.categoryId ?? "__uncategorized__",
@@ -382,9 +382,9 @@ export function DashboardPage() {
             />
             <BreakdownCard
               title={t("dashboard.paymentMethodBreakdown")}
-              storageKey="opensublists-payment-breakdown-view"
+              barTitle={t("dashboard.paymentMethodAmounts")}
+              pieTitle={t("dashboard.paymentMethodShare")}
               currency={data.reporting.currency}
-              fx={data.reporting.fx}
               locale={i18n.language}
               items={data.paymentMethodBreakdown.map((item) => ({
                 key: item.paymentMethodId ?? "__none__",

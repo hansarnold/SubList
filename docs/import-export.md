@@ -1,9 +1,10 @@
 # OpenSubLists Import and Export Format
 
-> Status: Implemented archive schema version 3
-> Last updated: 2026-08-24
+> Status: Implemented archive schema V4; V3 is accepted only by the offline locale
+> transformer
+> Last updated: 2026-08-25
 > Media type: `application/json`  
-> Current target schema version: `3`
+> Current target schema version: `4`
 
 ## 1. Goals
 
@@ -29,7 +30,7 @@ The archive format must:
 ```json
 {
   "format": "opensublists",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "archiveId": "550e8400-e29b-41d4-a716-446655440000",
   "exportedAt": "2026-08-23T08:15:30.123Z",
   "generator": {
@@ -40,7 +41,8 @@ The archive format must:
     "displayName": "Example User",
     "timezone": "Asia/Shanghai",
     "reportingCurrency": "CNY",
-    "preferredLocale": "zh-Hans",
+    "interfaceLocale": "zh-Hans",
+    "emailLocale": "en",
     "defaultEmailReminderDaysBefore": 7,
     "emailReminderLocalTime": "09:00",
     "emailRemindersPaused": false
@@ -51,7 +53,9 @@ The archive format must:
 }
 ```
 
-Required top-level properties are fixed for schema version 3. Unknown top-level properties produce warnings but do not fail import unless they conflict with a defined field.
+Required top-level properties are fixed for schema version 4. Unknown top-level
+properties produce warnings but do not fail import unless they conflict with a defined
+field.
 
 ## 4. Exported Profile
 
@@ -60,7 +64,8 @@ type ExportProfile = {
   displayName: string | null;
   timezone: string;
   reportingCurrency: string;
-  preferredLocale: "en" | "zh-Hans";
+  interfaceLocale: "en" | "zh-Hans";
+  emailLocale: "en" | "zh-Hans";
   defaultEmailReminderDaysBefore: number;
   emailReminderLocalTime: string;
   emailRemindersPaused: boolean;
@@ -80,6 +85,14 @@ batch snapshot. A concurrent association edit therefore cannot produce an archiv
 whose subscription references a different point-in-time resource set.
 
 Profile settings are imported only when the user explicitly selects that option during confirmation.
+
+### 4.1 Schema V4 Locale Split
+
+The current format uses `profile.interfaceLocale` and `profile.emailLocale` as
+independent preferences. Delivery rows remain excluded. Runtime export, preview, and
+confirmation use V4 only; V3 is an offline migration input, not an HTTP import format.
+The deterministic transformer and operator workflow are defined in Section 15.3. See
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
 
 ## 5. Category Record
 
@@ -150,9 +163,9 @@ The archive intentionally omits `nextBillingOn` because it is derived and may be
 ```ts
 type ResourceSymbol = { type: "icon"; value: string } | { type: "emoji"; value: string } | null;
 
-type OpenSubListsArchiveV3 = {
+type OpenSubListsArchiveV4 = {
   format: "opensublists";
-  schemaVersion: 3;
+  schemaVersion: 4;
   archiveId: string;
   exportedAt: string;
   generator: {
@@ -163,7 +176,8 @@ type OpenSubListsArchiveV3 = {
     displayName: string | null;
     timezone: string;
     reportingCurrency: string;
-    preferredLocale: "en" | "zh-Hans";
+    interfaceLocale: "en" | "zh-Hans";
+    emailLocale: "en" | "zh-Hans";
     defaultEmailReminderDaysBefore: number;
     emailReminderLocalTime: string;
     emailRemindersPaused: boolean;
@@ -265,7 +279,7 @@ Validation errors include JSON-style paths but never echo complete sensitive rec
 {
   "archive": {
     "format": "opensublists",
-    "schemaVersion": 3
+    "schemaVersion": 4
   },
   "conflictStrategy": "skip",
   "importProfile": false
@@ -278,7 +292,7 @@ The actual archive contains all required fields. Example response:
 {
   "data": {
     "digest": "sha256-6f5902ac...",
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "counts": {
       "categories": 4,
       "paymentMethods": 2,
@@ -469,8 +483,8 @@ spreadsheet applications treat untrusted resource names as text rather than form
 
 ### 15.2 v2-to-v3 Reminder-safe Operator Tool
 
-The provider-gated renewal-email implementation increments the current archive version
-rather than silently changing version 2. Version 3 adds these user-owned preferences:
+The provider-gated renewal-email implementation historically incremented archive V2
+instead of silently changing it. V3 added these user-owned preferences:
 
 - Profile: `preferredLocale`, `defaultEmailReminderDaysBefore`,
   `emailReminderLocalTime`, and `emailRemindersPaused`.
@@ -489,8 +503,9 @@ will be stored but paused. Configuring a sender later does not send anything unt
 user explicitly reviews Settings and unpauses email. If the capability is available,
 preview still requires explicit confirmation before restoring any enabled choice.
 
-For this archive version, preview receives the selected `conflictStrategy` and
-`importProfile` beside the archive. It returns a structured `reminderImpact`:
+Those reminder fields and safety rules continue unchanged in V4. Current V4 preview
+receives the selected `conflictStrategy` and `importProfile` beside the archive and
+returns a structured `reminderImpact`:
 
 ```ts
 type ReminderImportImpact = {
@@ -508,8 +523,8 @@ enabled preference results. This safeguard applies even when `importProfile` is 
 system-owned identity-conflict suspension reason is never exported, imported, or
 cleared by this workflow.
 
-The runtime accepts only version 3. Convert a private version-2 archive offline before
-previewing it in the application:
+The historical V2-to-V3 transformer remains available as the first step for an older
+private archive:
 
 ```sh
 node tools/reminder-migration/cli.mjs \
@@ -522,9 +537,37 @@ account defaults shown above, and sets every migrated subscription to
 `emailReminderEnabled: false` with `emailReminderDaysBefore: null`. It refuses to
 overwrite an existing output unless `--overwrite` is supplied deliberately.
 
-For a version-1 archive, first run the v1-to-v2 refactor tool in §15.1, review its
-artifacts, and then run this v2-to-v3 transformer. No historical archive version is
-accepted by the Worker itself.
+For a version-1 archive, first run the v1-to-v2 refactor tool in Section 15.1, review
+its artifacts, and then run this V2-to-V3 transformer. Continue with the V3-to-V4 step
+below before using the current application. No historical archive version is accepted
+by the Worker itself.
+
+### 15.3 V3-to-V4 Split-locale Operator Tool
+
+V4 replaces the single V3 `profile.preferredLocale` with independent
+`profile.interfaceLocale` and `profile.emailLocale`. Convert a reviewed private V3
+archive offline:
+
+```sh
+pnpm migration:locale -- \
+  --input /private/path/opensublists-archive-v3.json \
+  --output /private/path/opensublists-archive-v4.json
+```
+
+The transformer:
+
+- Requires a strict V3 archive no larger than 5 MiB.
+- Copies `preferredLocale` to both V4 locale fields and removes the old field.
+- Preserves all other validated profile, resource, relationship, reminder, and
+  generator data.
+- Writes schema version 4 as deterministic formatted JSON with file mode `0600`.
+- Refuses to replace an existing output unless `--overwrite` is supplied; deliberate
+  replacement is written to a private temporary file and renamed atomically.
+
+Keep source and output archives outside the repository. Review the resulting profile
+languages and resource counts before previewing V4 in the application. This tool is
+the only code path that accepts V3; the HTTP runtime returns
+`UNSUPPORTED_ARCHIVE_VERSION` for it.
 
 ## 16. Native SubList Adapter
 
@@ -578,5 +621,5 @@ Implementation requires a redacted real export fixture. Field mappings must not 
 - Ensure one user cannot conflict with or overwrite another user's resources.
 - Report every unsupported native SubList field.
 - Reminder archive tests cover disabled legacy defaults, inherited versus overridden
-  lead days, persisted locale, explicit enable impact, forced pause without a sender,
-  and omission of every delivery/provider field.
+  lead days, independent interface and email locales, explicit enable impact, forced
+  pause without a sender, and omission of every delivery/provider field.

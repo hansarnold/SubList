@@ -75,6 +75,11 @@ create APIs, then stores only the returned UUID on the subscription; it does not
 persistence decision. See
 [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
 
+Phase 5 keeps this persistence model and replaces the end-user preset vocabulary,
+permanent Settings catalog, and ambiguous template actions with compact Saved,
+Common, Create, and Add-and-select flows. See
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
+
 ### 2.4 Symbols Are Structured Data
 
 Emoji must not be embedded into resource names as a presentation convention. Category,

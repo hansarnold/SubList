@@ -66,7 +66,6 @@ function renderField({
           loading={loading}
           error={error}
           validationError={validationError}
-          manageFrom="/subscriptions/new"
           onChange={onChange}
           onRetry={onRetry}
           onPendingChange={() => undefined}
@@ -78,14 +77,15 @@ function renderField({
 }
 
 describe("subscription resource association field", () => {
-  it("keeps presets and custom creation available for a successful empty list", () => {
+  it("shows saved, common, and create flows without leaving the subscription form", () => {
     renderField();
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
+    expect(screen.getByRole("heading", { name: "Saved categories" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Common categories" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Entertainment" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create custom" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Manage in Settings" }).getAttribute("href")).toBe(
-      "/settings/categories?from=%2Fsubscriptions%2Fnew",
-    );
+    expect(screen.getByRole("button", { name: "Create category" })).toBeTruthy();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByRole("button", { name: "No category" })).toBeTruthy();
   });
 
   it("disables only the association field while its choices are loading", () => {
@@ -105,11 +105,11 @@ describe("subscription resource association field", () => {
     const { onChange } = renderField();
 
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Create custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Category name" }), {
       target: { value: created.name },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(created.id));
     expect(create).toHaveBeenCalledWith(
@@ -140,7 +140,6 @@ describe("subscription resource association field", () => {
               resources={[]}
               loading={false}
               error={null}
-              manageFrom="/subscriptions/new"
               onChange={onChange}
               onRetry={() => undefined}
               onPendingChange={() => undefined}
@@ -151,11 +150,11 @@ describe("subscription resource association field", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Create custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Category name" }), {
       target: { value: created.name },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(created.id));
     expect(parentSubmit).not.toHaveBeenCalled();
@@ -179,11 +178,11 @@ describe("subscription resource association field", () => {
     const { onChange } = renderField({ client });
 
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Create custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Category name" }), {
       target: { value: created.name },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
 
     await waitFor(() =>
       expect(cancel).toHaveBeenCalledWith({ queryKey: categoriesQueryKey("user-1") }),
@@ -213,22 +212,24 @@ describe("subscription resource association field", () => {
     const create = vi.spyOn(api, "createCategory");
     renderField();
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Create custom" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create category" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("selects a normalized existing category instead of creating a duplicate", () => {
+  it("omits a common choice when a normalized saved category already exists", () => {
     const create = vi.spyOn(api, "createCategory");
     const { onChange } = renderField({ resources: [existingCategory] });
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Productivity.*Already added/ }));
+    const productivityOptions = screen.getAllByRole("button", { name: "Productivity" });
+    expect(productivityOptions).toHaveLength(1);
+    fireEvent.click(productivityOptions[0]!);
     expect(onChange).toHaveBeenCalledWith(existingCategory.id);
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("reviews and creates a preset without changing another user's cache", async () => {
+  it("creates a common category without changing another user's cache", async () => {
     const created: Category = {
       ...existingCategory,
       id: "category-2",
@@ -242,11 +243,11 @@ describe("subscription resource association field", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Category/ }));
     fireEvent.click(screen.getByRole("button", { name: "Entertainment" }));
-    expect(screen.getByRole("dialog", { name: "Review category preset" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Create category" })).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Category name" }), {
       target: { value: "Movies" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(created.id));
     expect(client.getQueryData<Category[]>(categoriesQueryKey("user-1"))).toEqual([created]);
@@ -281,7 +282,6 @@ describe("subscription resource association field", () => {
             resources={[]}
             loading={false}
             error={null}
-            manageFrom="/subscriptions/new"
             onChange={onChange}
             onRetry={() => undefined}
             onPendingChange={() => undefined}
@@ -292,14 +292,14 @@ describe("subscription resource association field", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Payment method/ }));
     fireEvent.click(screen.getByRole("button", { name: "Visa" }));
-    expect(screen.getByRole("dialog", { name: "Review payment method preset" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Create payment method" })).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
       target: { value: created.name },
     });
     fireEvent.change(screen.getByRole("textbox", { name: /^Safe display label/ }), {
       target: { value: created.label },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(created.id));
     expect(client.getQueryData<PaymentMethod[]>(paymentMethodsQueryKey("user-1"))).toEqual([
@@ -322,13 +322,13 @@ describe("subscription resource association field", () => {
     fireEvent.click(screen.getByRole("button", { name: "Entertainment" }));
     const nameInput = screen.getByRole("textbox", { name: "Category name" });
     fireEvent.change(nameInput, { target: { value: created.name } });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
 
     expect(await screen.findByText("temporary create failure")).toBeTruthy();
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Category name" }).value).toBe(
       created.name,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Create and use" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add and select" }));
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(created.id));
   });
 

@@ -1,8 +1,9 @@
 # OpenSubLists Data Model
 
-> Status: Implemented baseline, reporting refactor, and provider-gated renewal email
+> Status: Implemented baseline, reporting refactor, provider-gated renewal email, and
+> Phase 5 locale split through migration 0007
 >
-> Last updated: 2026-08-24
+> Last updated: 2026-08-25
 >
 > Target database: Cloudflare D1
 >
@@ -153,11 +154,13 @@ and the reviewed user fields inside the same D1 batch that applies the archive. 
 change aborts the whole batch and requires a new preview. The revision is internal and
 is never returned by the API or included in an export.
 
-Provider-gated reminder columns added by migration 0005:
+Provider-gated reminder columns added by migration 0005, with `email_locale` added by
+migration 0007:
 
 | Column                                     | Type    | Null | Description                                                    |
 | ------------------------------------------ | ------- | ---- | -------------------------------------------------------------- |
-| preferred_locale                           | TEXT    | No   | `en` or `zh-Hans`; migration/default is `en`                   |
+| preferred_locale                           | TEXT    | No   | Interface locale, `en` or `zh-Hans`; default is `en`           |
+| email_locale                               | TEXT    | No   | Reminder-email locale, `en` or `zh-Hans`; default is `en`      |
 | default_email_reminder_days_before         | INTEGER | No   | Account default in `0..365`; migration/default is `7`          |
 | email_reminder_local_time                  | TEXT    | No   | Whole-hour local `HH:00`; migration/default is `09:00`         |
 | email_reminders_paused                     | INTEGER | No   | User-controlled suppression; migration/default is `0`          |
@@ -165,22 +168,34 @@ Provider-gated reminder columns added by migration 0005:
 | email_reminder_suspension_reason           | TEXT    | Yes  | System safety pause; initially `identity_email_conflict` only  |
 | email_reminder_suspension_email_normalized | TEXT    | Yes  | Internal collision candidate paired with the suspension reason |
 
-`preferred_locale` becomes the persisted account language rather than a copy of an
-arbitrary request header. The UI updates it through the authenticated profile API.
+`preferred_locale` is the persisted interface language and is exposed by the API as
+`interfaceLocale`; it is not copied from an arbitrary request header. `email_locale`
+is exposed as `emailLocale` and is the only locale read during reminder rendering.
+The UI updates both independently through the authenticated profile API.
 `email_reminder_local_time` initially matches `^([01]\d|2[0-3]):00$`; arbitrary
 minutes require an interval-based scheduler and are not accepted. D1 checks locale,
 lead-day bounds, whole-hour shape, boolean `0 | 1` values, a non-negative revision, and
-the suspension-reason allow-list. The additive migration backfills every existing row
-with the defaults above and a null suspension reason. D1 cannot read the earlier
-browser-only locale, so the upgraded UI asks an existing user to save the currently
-selected browser locale when it differs from the persisted `en` default; no request
-header silently overwrites it.
+the suspension-reason allow-list. Migration 0005 backfills its reminder defaults and
+a null suspension reason. Migration 0007 adds `email_locale` and then copies each
+row's existing `preferred_locale` value into it, preserving the previous shared
+language as the initial value for both independent preferences.
 
-`email_reminder_revision` increments only when `primary_email`, time zone, preferred
-locale, account lead time, or local delivery time actually changes. Display name,
-reporting currency, reads, and no-op authentication refreshes do not advance it. User
-pause and system suspension gate delivery separately and do not change the rendered
-envelope revision.
+`email_reminder_revision` increments only when `primary_email`, time zone,
+`email_locale`, account lead time, or local delivery time actually changes. An
+interface-only `preferred_locale` change, display name, reporting currency, reads,
+and no-op authentication refreshes do not advance it. User pause and system
+suspension gate delivery separately and do not change the rendered envelope revision.
+
+### 4.1.1 Phase 5 Locale Split — Implemented
+
+Migration `0007_split_interface_email_locales.sql` keeps `preferred_locale` as
+interface-locale storage and adds `email_locale`, backfilled from it. Runtime UI reads
+the former through `interfaceLocale`; reminder rendering reads only the latter through
+`emailLocale`. An email-locale change advances `email_reminder_revision`, while an
+interface-locale change does not. This additive change is covered by fresh-database
+and populated-upgrade migration tests. Applying it to a hosted database still requires
+the normal backup, migration, and deployment gates. See
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
 
 ## 4.2 auth_identities
 
@@ -797,7 +812,8 @@ The database enforces relational ownership, allowed enum values, non-negative am
 - Paired symbol fields, allow-listed icon tokens, and single-grapheme emoji.
 - Complete FX snapshots and canonical positive rate decimals.
 - Recurrence and month-end behavior.
-- Reminder lead-day bounds, whole-hour local delivery-time shape, persisted locale,
+- Reminder lead-day bounds, whole-hour local delivery-time shape, independent
+  interface/email locales,
   lifecycle eligibility, delivery state transitions, one-logical-row-per-occurrence
   semantics, and explicit handling of ambiguous provider results.
 - Request payload size and note length.

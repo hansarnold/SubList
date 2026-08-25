@@ -23,7 +23,7 @@ import type {
   Dashboard,
   ImportPreview,
   ImportResult,
-  OpenSubListsArchiveV3,
+  OpenSubListsArchiveV4,
   PaymentMethod,
   Subscription,
   SubscriptionDetail,
@@ -104,7 +104,10 @@ export class OpenSubListsService {
   async updateMe(userId: string, input: UpdateUserInput): Promise<User> {
     if (input.reportingCurrency !== undefined) assertCurrencyCode(input.reportingCurrency);
     if (input.timezone !== undefined) assertIanaTimeZone(input.timezone);
-    if (input.preferredLocale !== undefined) assertReminderLocale(input.preferredLocale);
+    if (input.interfaceLocale !== undefined) {
+      assertReminderLocale(input.interfaceLocale, "interfaceLocale");
+    }
+    if (input.emailLocale !== undefined) assertReminderLocale(input.emailLocale, "emailLocale");
     if (input.defaultEmailReminderDaysBefore !== undefined) {
       assertReminderDaysBefore(input.defaultEmailReminderDaysBefore);
     }
@@ -127,7 +130,8 @@ export class OpenSubListsService {
     if (input.displayName !== undefined) patch.displayName = input.displayName;
     if (input.timezone !== undefined) patch.timezone = input.timezone;
     if (input.reportingCurrency !== undefined) patch.reportingCurrency = input.reportingCurrency;
-    if (input.preferredLocale !== undefined) patch.preferredLocale = input.preferredLocale;
+    if (input.interfaceLocale !== undefined) patch.interfaceLocale = input.interfaceLocale;
+    if (input.emailLocale !== undefined) patch.emailLocale = input.emailLocale;
     if (input.defaultEmailReminderDaysBefore !== undefined) {
       patch.defaultEmailReminderDaysBefore = input.defaultEmailReminderDaysBefore;
     }
@@ -619,13 +623,13 @@ export class OpenSubListsService {
     };
   }
 
-  async exportArchive(userId: string): Promise<OpenSubListsArchiveV3> {
+  async exportArchive(userId: string): Promise<OpenSubListsArchiveV4> {
     const { user, categories, paymentMethods, subscriptions } =
       await this.repository.readExportSnapshot(userId);
     if (user === null) throw notFound("User");
     return {
       format: "opensublists",
-      schemaVersion: 3,
+      schemaVersion: 4,
       archiveId: crypto.randomUUID(),
       exportedAt: new Date(this.now()).toISOString(),
       generator: { name: "OpenSubLists", version: "0.1.0" },
@@ -633,7 +637,8 @@ export class OpenSubListsService {
         displayName: user.displayName,
         timezone: user.timezone,
         reportingCurrency: user.reportingCurrency,
-        preferredLocale: user.preferredLocale,
+        interfaceLocale: user.interfaceLocale,
+        emailLocale: user.emailLocale,
         defaultEmailReminderDaysBefore: user.defaultEmailReminderDaysBefore,
         emailReminderLocalTime: user.emailReminderLocalTime,
         emailRemindersPaused: user.emailRemindersPaused,
@@ -662,7 +667,7 @@ export class OpenSubListsService {
     );
     return {
       digest: await importApprovalDigest(archive, review),
-      schemaVersion: 3,
+      schemaVersion: 4,
       counts: {
         categories: archive.categories.length,
         paymentMethods: archive.paymentMethods.length,
@@ -805,7 +810,11 @@ export class OpenSubListsService {
               displayName: archive.profile.displayName,
               timezone: archive.profile.timezone,
               reportingCurrency: assertCurrencyCode(archive.profile.reportingCurrency),
-              preferredLocale: assertReminderLocale(archive.profile.preferredLocale),
+              interfaceLocale: assertReminderLocale(
+                archive.profile.interfaceLocale,
+                "profile.interfaceLocale",
+              ),
+              emailLocale: assertReminderLocale(archive.profile.emailLocale, "profile.emailLocale"),
               defaultEmailReminderDaysBefore: assertReminderDaysBefore(
                 archive.profile.defaultEmailReminderDaysBefore,
               ),
@@ -975,7 +984,8 @@ export function toApiUser(value: AppUser): User {
       value.onboardingCompletedAt === null
         ? null
         : new Date(value.onboardingCompletedAt).toISOString(),
-    preferredLocale: value.preferredLocale,
+    interfaceLocale: value.interfaceLocale,
+    emailLocale: value.emailLocale,
     defaultEmailReminderDaysBefore: value.defaultEmailReminderDaysBefore,
     emailReminderLocalTime: value.emailReminderLocalTime,
     emailRemindersPaused: value.emailRemindersPaused,
@@ -1072,11 +1082,11 @@ function comparePositionAndId<T extends { position: number; id: string }>(
   return left.position - right.position || left.id.localeCompare(right.id);
 }
 
-function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV3 {
-  const archive = source as OpenSubListsArchiveV3;
+function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV4 {
+  const archive = source as OpenSubListsArchiveV4;
   return {
     format: "opensublists",
-    schemaVersion: 3,
+    schemaVersion: 4,
     archiveId: archive.archiveId,
     exportedAt: new Date(archive.exportedAt).toISOString(),
     generator: { name: "OpenSubLists", version: archive.generator.version },
@@ -1084,7 +1094,11 @@ function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV
       displayName: archive.profile.displayName,
       timezone: assertIanaTimeZone(archive.profile.timezone),
       reportingCurrency: assertCurrencyCode(archive.profile.reportingCurrency),
-      preferredLocale: assertReminderLocale(archive.profile.preferredLocale),
+      interfaceLocale: assertReminderLocale(
+        archive.profile.interfaceLocale,
+        "profile.interfaceLocale",
+      ),
+      emailLocale: assertReminderLocale(archive.profile.emailLocale, "profile.emailLocale"),
       defaultEmailReminderDaysBefore: assertReminderDaysBefore(
         archive.profile.defaultEmailReminderDaysBefore,
       ),
@@ -1122,7 +1136,7 @@ function buildReconciliationUpdates(
 }
 
 function validateImportCapacity(
-  archive: OpenSubListsArchiveV3,
+  archive: OpenSubListsArchiveV4,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): void {
@@ -1169,7 +1183,7 @@ function mapResourceLimitError(error: unknown): ApplicationError | null {
   return null;
 }
 
-function validateArchiveRelationships(archive: OpenSubListsArchiveV3): void {
+function validateArchiveRelationships(archive: OpenSubListsArchiveV4): void {
   const categoryIds = assertUniqueIds(archive.categories, "categories");
   const paymentMethodIds = assertUniqueIds(archive.paymentMethods, "paymentMethods");
   assertUniqueIds(archive.subscriptions, "subscriptions");
@@ -1216,7 +1230,7 @@ function importValidation(path: string, code: string): ApplicationError {
 }
 
 function validateCategoryNameConflicts(
-  archive: OpenSubListsArchiveV3,
+  archive: OpenSubListsArchiveV4,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): void {
@@ -1254,7 +1268,7 @@ type ImportReviewContext = {
 };
 
 function importReviewContext(
-  archive: OpenSubListsArchiveV3,
+  archive: OpenSubListsArchiveV4,
   state: ExistingImportState,
   conflictStrategy: ImportPreviewRequest["conflictStrategy"],
   importProfile: boolean,
@@ -1282,7 +1296,7 @@ function importReviewContext(
 }
 
 async function importApprovalDigest(
-  archive: OpenSubListsArchiveV3,
+  archive: OpenSubListsArchiveV4,
   review: ImportReviewContext,
 ): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify({ archive, review }));
@@ -1293,7 +1307,7 @@ async function importApprovalDigest(
 }
 
 function createDuplicateIdMaps(
-  archive: OpenSubListsArchiveV3,
+  archive: OpenSubListsArchiveV4,
   strategy: "skip" | "overwrite" | "duplicate",
 ) {
   return {
@@ -1330,7 +1344,7 @@ function emptyImportResult(warnings: ImportResult["warnings"]): ImportResult {
 }
 
 function countEnabledPreferencesAfterApply(
-  archive: OpenSubListsArchiveV3,
+  archive: OpenSubListsArchiveV4,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): number {

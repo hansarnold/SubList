@@ -20,7 +20,8 @@ export type AppUser = {
   timezone: string;
   reportingCurrency: string;
   onboardingCompletedAt: number | null;
-  preferredLocale: ReminderLocale;
+  interfaceLocale: ReminderLocale;
+  emailLocale: ReminderLocale;
   defaultEmailReminderDaysBefore: number;
   emailReminderLocalTime: string;
   emailRemindersPaused: boolean;

@@ -30,6 +30,7 @@ export type UserRow = {
   created_at: number;
   updated_at: number;
   preferred_locale: "en" | "zh-Hans";
+  email_locale: "en" | "zh-Hans";
   default_email_reminder_days_before: number;
   email_reminder_local_time: string;
   email_reminders_paused: number;
@@ -148,7 +149,8 @@ export function mapUserRow(row: UserRow): AppUser {
     timezone: row.timezone,
     reportingCurrency: row.reporting_currency,
     onboardingCompletedAt: row.onboarding_completed_at,
-    preferredLocale: row.preferred_locale,
+    interfaceLocale: row.preferred_locale,
+    emailLocale: row.email_locale,
     defaultEmailReminderDaysBefore: row.default_email_reminder_days_before,
     emailReminderLocalTime: row.email_reminder_local_time,
     emailRemindersPaused: row.email_reminders_paused === 1,

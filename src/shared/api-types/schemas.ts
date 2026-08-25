@@ -108,7 +108,8 @@ export const updateUserSchema = z
     displayName: z.string().trim().min(1).max(120).nullable().optional(),
     timezone: timezoneSchema.optional(),
     reportingCurrency: currencySchema.optional(),
-    preferredLocale: reminderLocaleSchema.optional(),
+    interfaceLocale: reminderLocaleSchema.optional(),
+    emailLocale: reminderLocaleSchema.optional(),
     defaultEmailReminderDaysBefore: reminderDaysBeforeSchema.optional(),
     emailReminderLocalTime: reminderLocalTimeSchema.optional(),
     emailRemindersPaused: z.boolean().optional(),
@@ -219,7 +220,7 @@ export const subscriptionArchiveSchema = z.strictObject({
   updatedAt: timestampSchema,
 });
 
-/** Offline migration input only. Runtime import routes use archiveV3Schema. */
+/** Offline migration input only. Runtime import routes use archiveV4Schema. */
 export const subscriptionArchiveV2Schema = subscriptionArchiveSchema.omit({
   emailReminderEnabled: true,
   emailReminderDaysBefore: true,
@@ -271,14 +272,40 @@ export const archiveV3Schema = z
   })
   .passthrough();
 
+export const archiveV4Schema = z
+  .object({
+    format: z.literal("opensublists"),
+    schemaVersion: z.literal(4),
+    archiveId: uuidSchema,
+    exportedAt: timestampSchema,
+    generator: z.strictObject({
+      name: z.literal("OpenSubLists"),
+      version: z.string().min(1).max(64),
+    }),
+    profile: z.strictObject({
+      displayName: z.string().max(120).nullable(),
+      timezone: timezoneSchema,
+      reportingCurrency: currencySchema,
+      interfaceLocale: reminderLocaleSchema,
+      emailLocale: reminderLocaleSchema,
+      defaultEmailReminderDaysBefore: reminderDaysBeforeSchema,
+      emailReminderLocalTime: reminderLocalTimeSchema,
+      emailRemindersPaused: z.boolean(),
+    }),
+    categories: z.array(categoryArchiveSchema).max(100),
+    paymentMethods: z.array(paymentMethodArchiveSchema).max(100),
+    subscriptions: z.array(subscriptionArchiveSchema).max(50),
+  })
+  .passthrough();
+
 export const importPreviewRequestSchema = z.strictObject({
-  archive: archiveV3Schema,
+  archive: archiveV4Schema,
   conflictStrategy: z.enum(["skip", "overwrite", "duplicate"]),
   importProfile: z.boolean(),
 });
 
 export const importRequestSchema = z.strictObject({
-  archive: archiveV3Schema,
+  archive: archiveV4Schema,
   expectedDigest: z.string().regex(/^sha256-[a-f0-9]{64}$/),
   conflictStrategy: z.enum(["skip", "overwrite", "duplicate"]),
   importProfile: z.boolean(),

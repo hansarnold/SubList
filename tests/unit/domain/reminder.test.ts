@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assertReminderLocale,
+  DomainValidationError,
   effectiveReminderDaysBefore,
   nextReminderPlanOnOrAfter,
   reminderPlanForBilling,
@@ -16,6 +18,17 @@ const daily: RecurrenceRule = {
 };
 
 describe("renewal reminder planning", () => {
+  it("reports the caller-selected locale field when validation fails", () => {
+    expect(assertReminderLocale("zh-Hans", "interfaceLocale")).toBe("zh-Hans");
+    try {
+      assertReminderLocale("fr", "interfaceLocale");
+      throw new Error("Expected locale validation to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DomainValidationError);
+      expect(error).toMatchObject({ code: "INVALID_REMINDER", path: "interfaceLocale" });
+    }
+  });
+
   it("keeps opt-in separate while resolving an inherited lead time", () => {
     expect(effectiveReminderDaysBefore(7, null)).toBe(7);
     expect(effectiveReminderDaysBefore(7, 0)).toBe(0);

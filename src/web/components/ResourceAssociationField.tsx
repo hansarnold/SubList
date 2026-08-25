@@ -4,7 +4,6 @@ import {
   IconPlus,
   IconRefresh,
   IconSearch,
-  IconSettings,
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
@@ -21,7 +20,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { normalizeCategoryNameKey } from "../../domain/text-normalization";
 import type { ResourceSymbol } from "../../domain/symbol";
 import {
@@ -94,7 +92,6 @@ type ResourceAssociationFieldProps = {
   error: unknown;
   validationError?: string | undefined;
   disabled?: boolean;
-  manageFrom: string;
   onChange: (id: string) => void;
   onRetry: () => void;
   onPendingChange: (pending: boolean) => void;
@@ -182,13 +179,7 @@ function ResourceEditorDialog({
   }
 
   const title =
-    draft.kind === "category"
-      ? draft.mode === "preset"
-        ? t("form.reviewCategoryPreset")
-        : t("form.createCategory")
-      : draft.mode === "preset"
-        ? t("form.reviewPaymentPreset")
-        : t("form.createPaymentMethod");
+    draft.kind === "category" ? t("form.createCategory") : t("form.createPaymentMethod");
 
   return createPortal(
     <dialog
@@ -244,7 +235,7 @@ function ResourceEditorDialog({
             {t("app.cancel")}
           </Button>
           <Button type="submit" disabled={busy}>
-            {busy ? t("app.saving") : t("form.createAndUse")}
+            {busy ? t("app.saving") : t("form.addAndSelect")}
           </Button>
         </div>
       </form>
@@ -263,7 +254,6 @@ export function ResourceAssociationField({
   error,
   validationError,
   disabled = false,
-  manageFrom,
   onChange,
   onRetry,
   onPendingChange,
@@ -282,8 +272,6 @@ export function ResourceAssociationField({
   const validationErrorId = validationError ? `${id}-error` : undefined;
   const selected = resources.find((resource) => resource.id === value);
   const resourceLabel = kind === "category" ? t("form.category") : t("form.paymentMethod");
-  const settingsPath = kind === "category" ? "/settings/categories" : "/settings/payment-methods";
-
   const presets = useMemo<PresetOption[]>(
     () =>
       kind === "category"
@@ -308,10 +296,19 @@ export function ResourceAssociationField({
   const filteredResources = normalizedSearch
     ? resources.filter((resource) => resource.name.toLocaleLowerCase().includes(normalizedSearch))
     : resources;
+  const availablePresets = presets.filter(
+    (preset) =>
+      !resources.some(
+        (resource) =>
+          normalizeCategoryNameKey(resource.name) === normalizeCategoryNameKey(preset.name),
+      ),
+  );
   const filteredPresets = normalizedSearch
-    ? presets.filter((preset) => preset.name.toLocaleLowerCase().includes(normalizedSearch))
-    : presets;
-  const showSearch = resources.length + presets.length >= 10;
+    ? availablePresets.filter((preset) =>
+        preset.name.toLocaleLowerCase().includes(normalizedSearch),
+      )
+    : availablePresets;
+  const showSearch = resources.length + availablePresets.length > 10;
 
   const createMutation = useMutation({
     mutationFn: (request: CreateRequest): Promise<AssociationResource> =>
@@ -484,7 +481,7 @@ export function ResourceAssociationField({
   ) : value ? (
     <span>{t("form.currentAssociationUnavailable")}</span>
   ) : (
-    <span>{t("form.none")}</span>
+    <span>{kind === "category" ? t("form.noCategory") : t("form.noPaymentMethod")}</span>
   );
 
   return (
@@ -553,7 +550,9 @@ export function ResourceAssociationField({
           ) : null}
 
           <section className="resource-association__section">
-            <h3>{t("form.existingResources", { resource: resourceLabel })}</h3>
+            <h3>
+              {kind === "category" ? t("form.savedCategories") : t("form.savedPaymentMethods")}
+            </h3>
             <button
               type="button"
               className={!value ? "is-selected" : undefined}
@@ -563,7 +562,7 @@ export function ResourceAssociationField({
               <span className="resource-association__empty-symbol" aria-hidden="true">
                 —
               </span>
-              <span>{t("form.none")}</span>
+              <span>{kind === "category" ? t("form.noCategory") : t("form.noPaymentMethod")}</span>
             </button>
             {filteredResources.map((resource) => (
               <button
@@ -582,50 +581,29 @@ export function ResourceAssociationField({
             ) : null}
           </section>
 
-          <section className="resource-association__section">
-            <h3>
-              <IconSparkles size={16} aria-hidden="true" />
-              {t("form.createFromPreset")}
-            </h3>
-            {filteredPresets.map((preset) => {
-              const matchingCategory =
-                preset.kind === "category"
-                  ? resources.find(
-                      (resource) =>
-                        normalizeCategoryNameKey(resource.name) ===
-                        normalizeCategoryNameKey(preset.name),
-                    )
-                  : undefined;
-              return (
+          {availablePresets.length ? (
+            <section className="resource-association__section">
+              <h3>
+                <IconSparkles size={16} aria-hidden="true" />
+                {kind === "category" ? t("form.commonCategories") : t("form.commonPaymentMethods")}
+              </h3>
+              {filteredPresets.map((preset) => (
                 <button type="button" key={preset.key} onClick={() => openPreset(preset)}>
                   {presetSymbol(preset)}
-                  <span>
-                    {preset.name}
-                    {matchingCategory ? <small>{t("settings.presetAlreadyAdded")}</small> : null}
-                  </span>
+                  <span>{preset.name}</span>
                 </button>
-              );
-            })}
-            {normalizedSearch && filteredPresets.length === 0 ? (
-              <p>{t("form.noPresetMatches")}</p>
-            ) : null}
-          </section>
+              ))}
+              {normalizedSearch && filteredPresets.length === 0 ? (
+                <p>{t("form.noCommonMatches")}</p>
+              ) : null}
+            </section>
+          ) : null}
 
           <div className="resource-association__actions">
             <Button type="button" variant="ghost" onClick={openCustomDraft}>
               <IconPlus size={18} aria-hidden="true" />
-              {t("form.createCustom")}
+              {kind === "category" ? t("form.createCategory") : t("form.createPaymentMethod")}
             </Button>
-            <Link
-              className="button button--ghost"
-              to={`${settingsPath}?from=${encodeURIComponent(manageFrom)}`}
-              onClick={(event) => {
-                if (!window.confirm(t("form.leaveForSettingsWarning"))) event.preventDefault();
-              }}
-            >
-              <IconSettings size={18} aria-hidden="true" />
-              {t("form.manageInSettings")}
-            </Link>
           </div>
         </div>
       ) : null}

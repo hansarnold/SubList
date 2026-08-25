@@ -417,7 +417,7 @@ function assertSupportedArchiveVersion(source: unknown): void {
     archive.format === "opensublists" &&
     typeof archive.schemaVersion === "number" &&
     Number.isInteger(archive.schemaVersion) &&
-    archive.schemaVersion !== 3
+    archive.schemaVersion !== 4
   ) {
     throw new ApplicationError(
       "UNSUPPORTED_ARCHIVE_VERSION",

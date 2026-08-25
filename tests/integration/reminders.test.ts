@@ -30,7 +30,8 @@ describe("reminder migration invariants", () => {
     const repository = new D1OpenSubListsRepository(env.DB);
     const user = await repository.resolveUser(identity("defaults"), 1);
     expect(user).toMatchObject({
-      preferredLocale: "en",
+      interfaceLocale: "en",
+      emailLocale: "en",
       defaultEmailReminderDaysBefore: 7,
       emailReminderLocalTime: "09:00",
       emailRemindersPaused: false,
@@ -521,8 +522,58 @@ describe("reminder revision and identity safety", () => {
 
     await service.updateMe(user.id, { emailRemindersPaused: true });
     expect((await repository.getUser(user.id))?.emailReminderRevision).toBe(0);
-    await service.updateMe(user.id, { preferredLocale: "zh-Hans" });
+    await service.updateMe(user.id, { interfaceLocale: "zh-Hans" });
+    expect((await repository.getUser(user.id))?.emailReminderRevision).toBe(0);
+    await service.updateMe(user.id, { emailLocale: "zh-Hans" });
     expect((await repository.getUser(user.id))?.emailReminderRevision).toBe(1);
+  });
+
+  it("keeps pending deliveries for interface locale edits and cancels them for email locale edits", async () => {
+    const repository = new D1OpenSubListsRepository(env.DB);
+    const user = await repository.resolveUser(identity("locale-revisions"), 1);
+    const subscription = subscriptionWrite({ emailReminderEnabled: true });
+    await repository.createSubscription(user.id, subscription);
+    expect(
+      await repository.upsertReminderDeliveryPlan({
+        id: "30000000-0000-4000-8000-000000000099",
+        userId: user.id,
+        subscriptionId: subscription.id,
+        billingOn: "2026-08-31",
+        effectiveDaysBefore: 7,
+        intendedSendAt: deliveryNow,
+        expiresAt: deliveryNow + 1_000_000,
+        plannedUserReminderRevision: user.emailReminderRevision,
+        plannedSubscriptionReminderRevision: subscription.emailReminderRevision,
+        now: deliveryNow - 1,
+      }),
+    ).toBe(true);
+    const service = new OpenSubListsService(repository, () => deliveryNow, undefined, {
+      emailRemindersAvailable: true,
+      reminderStore: repository,
+    });
+
+    await service.updateMe(user.id, { interfaceLocale: "zh-Hans" });
+    expect(await repository.getUser(user.id)).toMatchObject({
+      interfaceLocale: "zh-Hans",
+      emailLocale: "en",
+      emailReminderRevision: 0,
+    });
+    expect(
+      (await repository.listSubscriptionReminderDeliveries(user.id, subscription.id, 1))[0],
+    ).toMatchObject({ status: "pending", lastErrorCode: null });
+
+    await service.updateMe(user.id, { emailLocale: "zh-Hans" });
+    expect(await repository.getUser(user.id)).toMatchObject({
+      interfaceLocale: "zh-Hans",
+      emailLocale: "zh-Hans",
+      emailReminderRevision: 1,
+    });
+    expect(
+      (await repository.listSubscriptionReminderDeliveries(user.id, subscription.id, 1))[0],
+    ).toMatchObject({
+      status: "cancelled",
+      lastErrorCode: "preference_or_revision_changed",
+    });
   });
 
   it("fails closed on verified-email ownership collision and clears only after recheck", async () => {
@@ -733,10 +784,10 @@ describe("reminder HTTP capability contract", () => {
     expect(serialized).not.toMatch(/providerMessageId|lastErrorCode|recipient|messageId/);
   });
 
-  it("previews reminder impact and forces pause for a V3 opt-in import without a sender", async () => {
+  it("previews reminder impact and forces pause for a V4 opt-in import without a sender", async () => {
     const unavailable = reminderApp(false);
     await reminderRequest(unavailable, "/api/v1/session");
-    const archive = reminderArchiveV3(true);
+    const archive = reminderArchiveV4(true);
     const previewResponse = await reminderRequest(unavailable, "/api/v1/imports/preview", {
       method: "POST",
       headers: reminderJsonHeaders(),
@@ -790,7 +841,7 @@ describe("reminder HTTP capability contract", () => {
     const unavailable = reminderApp(false);
     const available = reminderApp(true);
     await reminderRequest(unavailable, "/api/v1/session");
-    const archive = reminderArchiveV3(true);
+    const archive = reminderArchiveV4(true);
     const previewResponse = await reminderRequest(unavailable, "/api/v1/imports/preview", {
       method: "POST",
       headers: reminderJsonHeaders(),
@@ -920,11 +971,11 @@ async function expectReminderError(responsePromise: Promise<Response>, code: str
   await expect(response.json()).resolves.toMatchObject({ error: { code } });
 }
 
-function reminderArchiveV3(emailReminderEnabled: boolean) {
+function reminderArchiveV4(emailReminderEnabled: boolean) {
   const timestamp = "2026-08-24T00:00:00.000Z";
   return {
     format: "opensublists",
-    schemaVersion: 3,
+    schemaVersion: 4,
     archiveId: "10000000-0000-4000-8000-000000000091",
     exportedAt: timestamp,
     generator: { name: "OpenSubLists", version: "integration-test" },
@@ -932,7 +983,8 @@ function reminderArchiveV3(emailReminderEnabled: boolean) {
       displayName: null,
       timezone: "UTC",
       reportingCurrency: "USD",
-      preferredLocale: "en",
+      interfaceLocale: "en",
+      emailLocale: "en",
       defaultEmailReminderDaysBefore: 7,
       emailReminderLocalTime: "09:00",
       emailRemindersPaused: false,

@@ -1,8 +1,9 @@
 # OpenSubLists Environments and Deployment
 
-> Status: Implemented operations baseline and provider-gated renewal-email runtime;
-> production email activation remains an operator action
-> Last updated: 2026-08-24
+> Status: Implemented operations baseline, Phase 5 locale/archive contract, and
+> provider-gated renewal-email runtime; migration 0007 is applied in production and
+> email activation remains an operator action
+> Last updated: 2026-08-25
 > Deployment platform: Cloudflare
 
 ## 1. Environments
@@ -179,6 +180,7 @@ migrations/
   0004_reporting_presets_symbols.sql
   0005_renewal_email_reminders.sql
   0006_resource_revisions.sql
+  0007_split_interface_email_locales.sql
 ```
 
 Migration workflow:
@@ -210,6 +212,21 @@ a fresh target D1 database, and a coordinated Worker binding switch. The previou
 Worker and previous database remain paired for rollback; old and new application
 schemas do not require dual-read interoperability. Full procedure and verification
 gates are defined in [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md).
+
+Migration 0007 is additive: it keeps `preferred_locale` as interface-locale storage,
+adds `email_locale`, and backfills it from the previous shared value. The runtime and
+archive contract change together, so preserve any private V3 archive and transform a
+reviewed copy before deploying the V4-only runtime:
+
+```sh
+pnpm migration:locale -- \
+  --input /private/path/opensublists-archive-v3.json \
+  --output /private/path/opensublists-archive-v4.json
+```
+
+The command validates V3 strictly, enforces the runtime archive-size limit, creates
+owner-only output, and refuses accidental overwrite. This is an offline archive
+cutover tool; it does not make V3 a supported Worker import format.
 
 ## 7. Seed Data
 
@@ -262,7 +279,7 @@ An initial operator release may deploy directly to an already protected
 production hostname after all local gates pass. Before subsequent feature releases,
 provision the isolated preview environment and resume the normal preview-first flow.
 
-### 9.1 GitHub Pages Documentation Deployment — Implemented Locally, Publication Pending
+### 9.1 GitHub Pages Documentation Deployment — Published
 
 The public documentation site has a dedicated GitHub Actions workflow. It builds
 VitePress from the repository's `site/` directory, uploads only the generated static
@@ -276,9 +293,9 @@ protected application. The detailed implementation and artifact-security gates a
 defined in
 [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
 
-The repository owner must still select GitHub Actions as the Pages publishing source
-and complete the first successful workflow run. Local implementation must not be
-recorded as a live publication until the default project URL has been verified.
+GitHub Actions is the selected Pages publishing source and the default project URL has
+completed its first verified publication. Future pushes to `main` continue to deploy
+the documentation independently from the Worker release.
 
 ## 10. Release Smoke Tests
 
@@ -404,7 +421,11 @@ This is an operator checklist rather than a record of any specific deployment.
 - [ ] Production D1 created and bound only to production.
 - [ ] Preview D1 created and isolated.
 - [x] All migrations pass fresh and upgrade-path tests locally.
-- [ ] All production migrations applied remotely.
+- [x] All production migrations applied remotely.
+- [x] Migration 0007 applied to the intended hosted D1 after a recovery point is
+      recorded.
+- [ ] Any private V3 archive needed for rollback or transfer transformed to V4 and
+      reviewed without committing either file.
 - [ ] Access OTP and initial allowlist configured.
 - [ ] Session durations configured to 30 days global and 7 days application/policy.
 - [ ] Access JWT issuer and audience values configured in `wrangler.local.jsonc`.
@@ -413,13 +434,18 @@ This is an operator checklist rather than a record of any specific deployment.
 - [ ] API cache policy verified.
 - [ ] Logging redaction verified.
 - [ ] JSON export tested.
-- [ ] D1 recovery process reviewed.
+- [x] D1 recovery process reviewed and an exact pre-0007 Time Travel bookmark recorded
+      outside the repository.
 - [ ] Daily Cron Trigger deployed and visible in Worker configuration.
 - [ ] Initial ECB snapshot populated and complete for active currencies.
 - [ ] Reporting estimates verified against an independent fixture.
 - [ ] Preview smoke tests passed.
 
 Phase 4 provider-gated reminder readiness:
+
+The approved Phase 5 operator-first activation sequence and normal-UI simplification
+are defined in
+[UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md).
 
 - [ ] Reminder migration applied with existing subscriptions disabled.
 - [ ] Native email binding or reviewed external provider configured only in the target

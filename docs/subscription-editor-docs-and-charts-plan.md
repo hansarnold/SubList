@@ -1,13 +1,22 @@
 # Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan
 
-> Status: Implemented locally; GitHub Pages publication and production sender
-> activation remain operator-gated
+> Status: Implemented and deployed; production sender activation remains
+> operator-gated; selected interaction details are superseded by the implemented
+> Phase 5 contract
 >
-> Last updated: 2026-08-24
+> Last updated: 2026-08-25
 >
 > Scope: Direct category and payment-method creation from subscription forms,
 > explicit per-subscription renewal email reminders, a public self-hosting guide on
 > GitHub Pages, and useful Dashboard charts
+
+> Phase 5 supersession: The implemented target in
+> [UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan](./ux-simplification-locale-email-and-charts-plan.md)
+> replaces this document's preset-facing labels and Settings presentation, shared
+> interface/email locale, language/provider warning treatment, Bar/Donut mode switch,
+> and single-group chart suppression. This document remains authoritative history for
+> the ordinary tenant-row preset model, resource editor reuse, recurrence planning,
+> D1 outbox and idempotency rules, privacy boundary, and provider adapter.
 
 ## 1. Outcome
 
@@ -65,7 +74,7 @@ views. Time-series and projected-month charts remain the explicit follow-up.
 
 At approval time only the reminder foundation existed: verified primary email, an IANA
 time zone, recurrence projection, and the daily FX handler. The implementation now
-adds explicit preferences, a D1 delivery ledger, persisted locale, retry policy,
+adds explicit preferences, a D1 delivery ledger, persisted email locale, retry policy,
 provider adapters, and an independent hourly handler. The tracked deployment example
 still omits the native binding and keeps the capability disabled.
 
@@ -483,8 +492,9 @@ The implemented account fields are:
 - `defaultEmailReminderDaysBefore`, default `7`, integer range `0..365`.
 - `emailReminderLocalTime`, default `09:00`, restricted initially to whole-hour
   `HH:00` choices and interpreted in the user's IANA time zone.
-- `preferredLocale`, one of `en` or `zh-Hans`, persisted because a background Worker
-  cannot read browser `localStorage`.
+- `emailLocale`, one of `en` or `zh-Hans`, persisted because a background Worker
+  cannot read the independently saved browser-interface locale. `interfaceLocale` is
+  a separate profile preference and never renders reminder content.
 - `emailRemindersPaused`, default `false`, a global suppression control that never
   enables a subscription.
 
@@ -552,15 +562,15 @@ attempted or terminal delivery for that subscription occurrence.
 
 ### 7.4 Persistence and API Contract
 
-Use an additive migration rather than a generic JSON settings column. Add the account
-and subscription fields above, bounded database checks, and a partial scan index for
-active, unarchived, reminder-enabled subscriptions. Existing users backfill to `en`,
-seven days, `09:00`, and not globally paused; existing subscriptions backfill to
-disabled with an inherited lead time. Add system-owned, non-negative reminder revision
-counters to users and subscriptions, both backfilled to zero, plus a nullable account
-suspension reason. Because D1 cannot read the earlier browser-only locale, the upgraded
-UI asks the existing user to save the current browser locale when it differs from the
-persisted default.
+Use additive migrations rather than a generic JSON settings column. Migration 0005
+adds the account and subscription fields above, bounded database checks, and a partial
+scan index for active, unarchived, reminder-enabled subscriptions. Existing users
+backfill to `en`, seven days, `09:00`, and not globally paused; existing subscriptions
+backfill to disabled with an inherited lead time. It also adds system-owned,
+non-negative reminder revision counters to users and subscriptions, both backfilled to
+zero, plus a nullable account suspension reason. Migration 0007 then keeps
+`preferred_locale` as API `interfaceLocale` storage, adds `email_locale`, and copies
+the previous shared locale into it. Reminder rendering reads only API `emailLocale`.
 
 Add a `renewal_email_deliveries` D1 table containing:
 
@@ -593,10 +603,10 @@ The API changes are:
 - Keep the full delivery ledger and provider details internal; they are operational
   state rather than user-facing payment history.
 
-The next archive schema version includes account defaults, locale, pause state, and
-subscription preferences. Delivery rows are never exported. Existing and legacy
-imports always default reminders to disabled unless a reviewed archive version
-explicitly contains the new preference. If the deployment lacks a sender, a reviewed
+Current archive schema V4 includes account defaults, independent interface and email
+locales, pause state, and subscription preferences. Delivery rows are never exported.
+Legacy transformations default reminders to disabled unless a reviewed archive
+explicitly contains the preference. If the deployment lacks a sender, a reviewed V4
 archive preserves enabled per-subscription choices but forces the account pause on;
 the user must explicitly unpause after provider setup.
 
@@ -649,7 +659,7 @@ that exact error. The initial native adapter may therefore never emit
 `definitely_not_accepted_retryable`; it must not translate a generic thrown `Error`
 into that outcome.
 
-Before the first provider attempt, a lead-time, local-time, time-zone, locale,
+Before the first provider attempt, a lead-time, local-time, time-zone, email-locale,
 recipient, subscription-content, or recurrence change may update or cancel the pending
 row. Global pause gates both `pending` and `retry_wait`: they remain dormant until
 unpaused, then resume only when their versions still match and `expires_at` has not
@@ -799,7 +809,8 @@ payment-label validation, and detachment on delete.
 - Daily and weekly recurrence where the lead time equals or exceeds the interval.
 - Month-end, leap-day, future-anchor, UTC-12, UTC+14, DST gap, and DST overlap cases.
 - Active versus cancelled and archived eligibility.
-- Locale and original-currency rendering with no FX dependency.
+- Email-locale and original-currency rendering with no FX dependency; interface-locale
+  changes do not alter an envelope revision.
 - Primary-email refresh, provider unavailable, permanent rejection, temporary failure,
   identity-email collision pause, retry exhaustion, and stale claim recovery.
 - Reminder-specific revision changes versus ordinary reads/no-op identity refreshes;
@@ -818,7 +829,7 @@ payment-label validation, and detachment on delete.
 - FX and reminders fail independently.
 - Local fake sender, preview restrictions, manual scheduled invocation, and production
   operator-only smoke delivery.
-- Existing-user defaults and locale handoff, archive round-trip, legacy import
+- Existing-user defaults and split-locale backfill, V4 archive round-trip, legacy import
   default-off behavior, unavailable-provider forced pause, and delivery-history
   omission.
 - Logs contain no email address, subscription name, message content, or raw provider
@@ -842,7 +853,7 @@ payment-label validation, and detachment on delete.
 4. Add Bar and Donut views plus authoritative HTML lists.
 5. Verify sparse, FX, accessibility, and responsive states.
 
-### Phase C: GitHub Pages — Implemented Locally
+### Phase C: GitHub Pages — Published
 
 1. Add the pinned VitePress dependency, `site/` source, and package scripts.
 2. Expand the canonical self-hosting guide and include it in the public site.
@@ -858,9 +869,9 @@ payment-label validation, and detachment on delete.
    private configuration inputs without enabling the binding.
 2. Complete the local-time conversion compatibility spike and lock
    `resolveReminderWindow` with DST and fractional-offset tests.
-3. Add the account/subscription migration, preferred locale, system suspension,
-   reminder revisions, delivery ledger, and the per-user resource revision used to
-   fail stale import confirmations atomically.
+3. Add the account/subscription migration, independent interface and email locales,
+   system suspension, reminder revisions, delivery ledger, and the per-user resource
+   revision used to fail stale import confirmations atomically.
 4. Extend identity resolution, API, archive, Settings, Subscription Create/Edit, and
    Subscription Detail.
 5. Implement the recurrence-based planner, D1 claim/retry path, and fake sender.
@@ -899,9 +910,9 @@ payment-label validation, and detachment on delete.
 
 ## 11. Completion Criteria
 
-The local implementation is complete when the following code and artifact criteria
-pass. Live Pages reachability and a real provider delivery remain separate operator
-acceptance gates:
+The implementation and Pages publication are complete when the following code and
+artifact criteria pass. A real provider delivery remains a separate operator
+acceptance gate:
 
 - A new or existing account can create or edit a subscription and use category and
   payment-method presets without navigating away.

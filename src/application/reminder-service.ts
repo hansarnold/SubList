@@ -247,7 +247,7 @@ export function deriveRenewalEmailDeliverySummary(input: {
 
 function renderCandidate(candidate: ReminderDeliveryCandidate, appBaseUrl: string) {
   return renderRenewalReminderEmail({
-    locale: candidate.user.preferredLocale,
+    locale: candidate.user.emailLocale,
     subscriptionId: candidate.subscription.id,
     subscriptionName: candidate.subscription.name,
     amountMicros: candidate.subscription.amountMicros,

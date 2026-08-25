@@ -1,4 +1,5 @@
 import {
+  IconCategory,
   IconCreditCard,
   IconHome,
   IconListDetails,
@@ -11,6 +12,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 
 const primaryNavigation = [
   { to: "/dashboard", labelKey: "nav.overview", icon: IconHome },
+  { to: "/categories", labelKey: "nav.categories", icon: IconCategory },
   { to: "/subscriptions", labelKey: "nav.subscriptions", icon: IconCreditCard },
 ] as const;
 

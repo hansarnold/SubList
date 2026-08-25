@@ -1,9 +1,8 @@
 # Self-host OpenSubLists on Cloudflare
 
-> Status: Supported manual deployment path; documentation site implemented but not
-> published by this checkout
+> Status: Supported manual deployment path; canonical documentation site published
 >
-> Last updated: 2026-08-24
+> Last updated: 2026-08-25
 >
 > Expected cost for the implemented personal deployment: Cloudflare Free plan limits
 
@@ -277,11 +276,11 @@ and normal CI run `pnpm docs:build` without publishing. A push to `main` or a ma
 workflow run may deploy only after the repository owner selects **GitHub Actions**
 under **Settings > Pages > Build and deployment > Source**.
 
-This checkout does not claim that Pages has been enabled or published. After the first
-successful deployment, verify the root page, a direct reload of
-`/SubList/guide/self-hosting.html`, anchors, local search, edit links, and the absence
-of a custom domain. The checked-in site configuration and privacy validator are pinned
-to this repository's canonical `hansarnold.github.io/SubList/` documentation URL.
+The canonical Pages project is published. After documentation changes, verify the root
+page, a direct reload of `/SubList/guide/self-hosting.html`, anchors, local search,
+edit links, and the absence of a custom domain. The checked-in site configuration and
+privacy validator are pinned to this repository's canonical
+`hansarnold.github.io/SubList/` documentation URL.
 Self-hosting the application from a fork does not require publishing a second copy of
 the documentation. A maintainer who deliberately republishes it under another
 repository or account must review and update the VitePress base and sitemap together
@@ -365,10 +364,10 @@ The native Cloudflare path is suitable for the maintainer and a small friend gro
    and Access metadata out of Git. Increase the positive revision whenever the binding,
    sender, or recipient policy changes.
 
-4. Back up D1, apply migrations `0005_renewal_email_reminders.sql` and
-   `0006_resource_revisions.sql`, run the production dry run, and deploy. The existing
-   production schedule already contains the daily FX trigger and the independent
-   `5 * * * *` reminder trigger.
+4. Back up D1 and apply every pending migration through
+   `0007_split_interface_email_locales.sql`, then run the production dry run and
+   deploy. The existing production schedule already contains the daily FX trigger and
+   the independent `5 * * * *` reminder trigger.
 5. Observe one normal production hourly run while all subscription reminder toggles
    are still off. Then enable one operator-owned subscription, verify one delivery and
    its redacted counters, and only then enable reminders for friends.
@@ -383,16 +382,34 @@ Preview may use the application fake or one strictly allowlisted operator destin
 Disabling `EMAIL_REMINDER_MODE` or removing the production binding pauses provider
 delivery without changing subscription choices or the core ledger.
 
-### 14.3 Upgrade an archive and clear a safety suspension
+### 14.3 Upgrade archives and clear a safety suspension
 
-The runtime imports archive schema V3 only. Convert a reviewed V2 archive offline;
-existing subscriptions remain reminder-disabled because the tool does not infer opt-in:
+The runtime exports and imports archive schema V4 only. Historical upgrades remain
+offline operator steps and do not add runtime compatibility.
+
+If the source is V2, first convert it to V3. Existing subscriptions remain
+reminder-disabled because the V2-to-V3 tool does not infer opt-in:
 
 ```sh
 node tools/reminder-migration/cli.mjs \
   --input /private/path/opensublists-archive-v2.json \
   --output /private/path/opensublists-archive-v3.json
 ```
+
+Then convert the reviewed V3 archive to V4. The locale transformer copies
+`profile.preferredLocale` into both `profile.interfaceLocale` and
+`profile.emailLocale`:
+
+```sh
+pnpm migration:locale -- \
+  --input /private/path/opensublists-archive-v3.json \
+  --output /private/path/opensublists-archive-v4.json
+```
+
+Both tools validate their source schema strictly, enforce private owner-only output,
+and refuse to overwrite an existing target unless `--overwrite` is supplied
+deliberately. Keep every archive outside the repository. V3 is accepted only by the
+offline locale transformer, never by the Worker import endpoints.
 
 If an identity-email collision created a system suspension, first resolve the ownership
 conflict and create a D1 recovery point. Then clear only the matching suspension by

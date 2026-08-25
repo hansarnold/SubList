@@ -30,9 +30,9 @@ export interface ReminderPlan {
 
 const WHOLE_HOUR_LOCAL_TIME_PATTERN = /^([01]\d|2[0-3]):00$/;
 
-export function assertReminderLocale(value: string): ReminderLocale {
+export function assertReminderLocale(value: string, path = "emailLocale"): ReminderLocale {
   if (!REMINDER_LOCALES.includes(value as ReminderLocale)) {
-    throw invalidReminder("The reminder locale must be 'en' or 'zh-Hans'.", "preferredLocale");
+    throw invalidReminder("The locale must be 'en' or 'zh-Hans'.", path);
   }
 
   return value as ReminderLocale;
