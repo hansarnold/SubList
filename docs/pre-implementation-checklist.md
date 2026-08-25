@@ -1,7 +1,7 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: Phase 5 is implemented and verified, and migration 0007 is applied in
-> production; the Phase 5 Worker rollout and email activation remain operator-gated
+> Status: Phase 5 is implemented, verified, migrated, and deployed; production email
+> activation remains operator-gated
 > Last updated: 2026-08-25
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
@@ -166,9 +166,9 @@ These inputs do not block local use:
 
 ## 12. Next Delivery Step
 
-Deploy the reviewed Phase 5 application with email still disabled, then treat
-activation for one verified operator destination as a separate rollout. Provision
-isolated preview resources before regular preview releases.
+Keep production email disabled until activation for one verified operator destination
+is deliberately started as a separate rollout. Provision isolated preview resources
+before regular preview releases.
 
 ## 13. Refactor Implementation Gate — Complete
 
@@ -220,7 +220,7 @@ isolated preview resources before regular preview releases.
 Evidence:
 [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md)
 
-## 15. Phase 5 Corrective Gate — Implemented; Release and Activation Pending
+## 15. Phase 5 Corrective Gate — Deployed; Email Activation Pending
 
 - [x] Diagnose the wide resource-row layout defect and ambiguous preset operations.
 - [x] Define separate Interface language and Email language preferences with no

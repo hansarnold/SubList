@@ -1,8 +1,7 @@
 # UX Simplification, Locale Separation, Email Activation, and Dashboard Charts Plan
 
-> Status: Implemented and verified in the repository; migration 0007 is applied in
-> production, while the Phase 5 Worker rollout and operator-first email activation
-> remain gated
+> Status: Implemented, verified, migrated, and deployed; operator-first email
+> activation remains gated
 >
 > Last updated: 2026-08-25
 >

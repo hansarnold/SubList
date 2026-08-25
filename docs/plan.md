@@ -1,14 +1,13 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: MVP and Phase 4 deployed; Phase 5 is implemented and migration 0007 is
-> applied in production, while the Phase 5 Worker rollout and email activation remain
-> operator-gated
+> Status: MVP through Phase 5 is deployed; production email activation remains an
+> operator-gated follow-up
 >
 > Last updated: 2026-08-25
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phase 5 Worker rollout and email activation remain operator actions
+> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phase 5 email activation remains an operator action
 
 ## 1. Project Overview
 
@@ -364,7 +363,7 @@ real mailbox.
 The detailed delivery sequence and acceptance gates are defined in
 [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
 
-### Phase 5: UX Simplification, Locale Separation, Email Activation, and Charts — Implemented Locally; Rollout Gated
+### Phase 5: UX Simplification, Locale Separation, Email Activation, and Charts — Deployed; Email Activation Gated
 
 - [x] Separate Interface language and Email language without mismatch warnings or
       copy-language actions.
