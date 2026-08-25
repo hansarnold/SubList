@@ -210,15 +210,52 @@ Verify all of the following before entering real subscription data:
 - The Worker cannot be reached through `workers.dev` or a version preview URL.
 - JSON export downloads a portable archive.
 
-## 11. Invite or remove a user
+## 11. Add or remove friends
 
-OpenSubLists has no application invitation table. Add or remove email addresses in the
-Cloudflare Access policy. Each authenticated identity is provisioned as an isolated
-application user on first access.
+For a small personal deployment, keep one explicit **Emails** allowlist in the
+Cloudflare Access policy. Access controls who may reach the application; OpenSubLists
+then creates a separate, isolated application account on that person's first
+successful login. There is no application invitation table, password, or D1 row to
+create manually.
 
-When renewal email is enabled, removing Access is only one part of
-offboarding. Pause that account's reminders or suppress/remove its destination at the
-email provider before removing the person's ability to sign in.
+### Give a friend access to the ledger
+
+1. In the Cloudflare dashboard, go to **Zero Trust > Access controls > Policies**.
+2. Locate the **Allow** policy attached to the OpenSubLists application and select
+   **Configure**.
+3. In its **Include** rule, keep the **Emails** selector and add the friend's exact
+   email address. Do not replace it with **Everyone**, an unrestricted domain, or
+   **Login Methods = One-time PIN**.
+4. Save the policy. If the policy tester is available, test the new address before
+   sharing the application URL.
+5. The friend opens the application URL, enters the same email address, requests a
+   one-time PIN, and completes the login. Their empty account is provisioned at that
+   point, and they cannot see another user's subscriptions.
+
+The friend does not need a Cloudflare account. Cloudflare's one-time-PIN email proves
+the identity, while the exact-email Access policy supplies the invitation boundary.
+
+If the friend only needs the ledger, stop here. To let them receive renewal email on
+the verified-recipient path as well:
+
+1. Add the same address under Cloudflare Email Routing destination addresses and ask
+   the friend to complete Cloudflare's verification message.
+2. Add the exact address to `allowed_destination_addresses` in the ignored private
+   `wrangler.local.jsonc` file.
+3. Increase `EMAIL_REMINDER_PROVIDER_CONFIG_REVISION`, run the production dry run,
+   and redeploy.
+
+OpenSubLists always uses the account's verified Access email as the reminder
+destination; a user cannot replace it with an unrelated address in the application.
+The complete sender and recipient configuration is in section 14.2.
+
+### Remove a friend's access
+
+Remove the exact address from the Access policy to block future logins. This does not
+erase that user's stored application data. When renewal email is enabled, removing
+Access is only one part of offboarding: pause that account's reminders or
+suppress/remove its destination at the email provider before removing the person's
+ability to sign in.
 
 The reminder phase also ships an operator-only suspension-clear command for an
 `identity_email_conflict`. It accepts an internal user ID, requires explicit

@@ -97,6 +97,12 @@ Approved emails remain in the Access policy and must not be committed. Productio
 also disables both `workers.dev` and version preview URLs to avoid an unprotected
 alternate entry point.
 
+To add a friend, add their exact email address to the same Access **Allow** policy.
+Their isolated OpenSubLists account is created automatically on first successful
+login; no application invitation, password, or manual D1 row is required. If that
+friend also needs renewal email, follow the separate verified-recipient steps in the
+self-hosting guide.
+
 Renewal email is optional and provider-gated. The tracked configuration keeps it
 disabled and contains no live sender binding. A self-hoster may configure a restricted
 Cloudflare `send_email` binding only in the ignored private configuration; every

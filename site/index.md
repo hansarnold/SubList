@@ -22,6 +22,8 @@ features:
     details: See one reporting-currency estimate without losing the original amount and currency for each subscription.
   - title: Small deployment
     details: One full-stack Worker and one D1 database run the responsive website, API, scheduled jobs, and storage.
+  - title: Optional renewal reminders
+    details: When email is configured, opt in per subscription, choose the lead time and language, and keep every new reminder off by default.
 ---
 
 ## See upcoming costs clearly
