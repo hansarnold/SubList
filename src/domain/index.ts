@@ -5,5 +5,6 @@ export * from "./fx";
 export * from "./money";
 export * from "./normalization";
 export * from "./recurrence";
+export * from "./reminder";
 export * from "./symbol";
 export * from "./text-normalization";

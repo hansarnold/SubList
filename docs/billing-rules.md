@@ -1,8 +1,11 @@
 # OpenSubLists Billing Rules
 
-> Status: Implemented recurrence specification with approved reporting refactor target
-> Last updated: 2026-08-23  
-> Purpose: Define deterministic recurrence, estimated reporting, conversion, and rounding behavior
+> Status: Implemented recurrence, reporting, and renewal-email specification
+>
+> Last updated: 2026-08-24
+>
+> Purpose: Define deterministic recurrence, reminder planning, estimated reporting,
+> conversion, and rounding behavior
 
 ## 1. Goals
 
@@ -37,7 +40,8 @@ The billing anchor does not need to be the first-ever payment. Any known occurre
 - Domain inputs and outputs use ISO calendar-date strings in `YYYY-MM-DD` form.
 - Calendar calculations must use a date-only representation.
 - UTC timestamps are not used to advance billing schedules.
-- The time zone is used only to determine local today and, in a later reminder feature, the delivery instant.
+- The time zone determines local today and, for renewal reminders, the intended
+  local delivery instant.
 - Daylight-saving time changes do not alter a date-only billing schedule.
 
 Invalid calendar dates such as `2026-02-30` are rejected even if they match the string pattern.
@@ -62,7 +66,7 @@ For a recurrence count `n`, occurrences are:
 anchor + k × n calendar days, where k is an integer
 ```
 
-The next occurrence uses the smallest `k >= 0` whose date is on or after local today. If the anchor is in the past, the implementation may calculate `k` directly from the calendar-day difference; it must not loop once per historical occurrence.
+The next occurrence uses the smallest integer `k` whose date is on or after local today. `k` may be negative because the anchor is any known occurrence, not a schedule-start boundary. The implementation calculates `k` directly from the calendar-day difference; it must not loop once per historical occurrence.
 
 ## 6. Weekly Recurrence
 
@@ -196,11 +200,73 @@ If an active record contains a `next_billing_on` earlier than local today:
 
 ### 11.3 Scheduled Reconciliation
 
-Future reminder processing must reconcile stale next-billing dates before selecting deliveries.
+Reminder processing reconciles stale next-billing dates before selecting
+deliveries, but `next_billing_on` is not its only occurrence candidate.
 
 ### 11.4 Client Trust Boundary
 
 The client may preview a calculation, but the server always recalculates it. Create and update payloads do not accept `nextBillingOn`.
+
+### 11.5 Renewal-email Date Rule
+
+For one explicitly enabled subscription, resolve:
+
+```text
+effectiveDaysBefore = subscriptionOverride ?? accountDefault
+targetBillingOn = addCalendarDays(planningLocalDate, effectiveDaysBefore)
+```
+
+The scheduler sends only when `targetBillingOn` belongs to the authoritative recurrence
+sequence. It must not implement the rule as only
+`next_billing_on - effectiveDaysBefore == planningLocalDate`. That shortcut fails when
+the lead time equals or exceeds the recurrence interval.
+
+Example:
+
+```text
+Rule: every Monday
+Planning local date: Monday, 2026-08-24
+Effective lead: 7 days
+Materialized next billing: 2026-08-24
+Target occurrence for today's reminder: 2026-08-31
+```
+
+`0` lead days means the billing date. The hourly Worker runs at a fixed UTC minute and
+delivers on its first run at or after the user's configured local time. The first
+release restricts that preference to whole-hour `HH:00` values so an eligible hourly
+run remains on the same local date even for `23:00`. It may catch up within the same
+local day, but it does not replay several missed local dates after an extended outage.
+
+Only active, unarchived subscriptions are eligible. A global account pause, explicit
+subscription disable, cancellation, or archive suppresses the send. The delivery key
+uses the target billing occurrence, so a time-zone or lead-time change cannot reopen an
+occurrence already sent.
+
+For a DST spring-forward gap, a configured local hour that does not exist resolves to
+the first valid instant after the gap on the same local date. For a fall-back overlap,
+use the earlier offset and first occurrence of the repeated hour. The logical delivery
+key still prevents the second occurrence from creating another row. Tests use an
+injected clock or `controller.scheduledTime`; the current Worker location and wall
+clock never change the result.
+
+Implement one domain primitive rather than offset arithmetic in the scheduler:
+
+```ts
+resolveReminderWindow({
+  planningOn,
+  localTime,
+  timeZone,
+}): { intendedAt: Instant; expiresAt: Instant };
+```
+
+It performs the missing local-wall-time-to-UTC conversion, applies the gap/overlap rule
+above, and resolves `expiresAt` as the exclusive start of the next local calendar date.
+The implementation lives beside the existing calendar-date utilities behind this
+contract. A focused runtime and bundle compatibility spike chooses a pinned
+timezone-capable implementation before reminder delivery code is written; inline
+fixed-offset guesses are prohibited. Unit fixtures cover ordinary offsets,
+fractional-hour zones, UTC-12/UTC+14, both DST transitions, and next-local-midnight
+expiry.
 
 ## 12. Amount and Reporting Rules
 
@@ -291,7 +357,7 @@ A refresh failure never removes the last known-good snapshot. Exchange rates are
 | Every three months        | 2026-01-31 | Every 3 months        | 2026-04-01  | 2026-04-30            |
 | Leap-day yearly           | 2024-02-29 | Yearly                | 2025-02-01  | 2025-02-28            |
 | Leap-day after occurrence | 2024-02-29 | Yearly                | 2025-03-01  | 2026-02-28            |
-| Future anchor             | 2026-12-01 | Monthly               | 2026-08-23  | 2026-12-01            |
+| Future known occurrence   | 2026-12-01 | Monthly               | 2026-08-23  | 2026-09-01            |
 | Cancelled                 | Any        | Any                   | Any         | `NULL`                |
 
 Additional property tests should verify:
@@ -310,6 +376,13 @@ Additional property tests should verify:
 - USD and CNY original totals remain separate while a complete snapshot produces one reporting-currency total.
 - Missing rates suppress every combined total and identify every missing currency.
 - Stale complete snapshots produce estimates with a stale state.
+- Reminder lead `0`, inherited lead, and subscription override produce the expected
+  target occurrence.
+- Daily and weekly schedules remain correct when the lead equals or exceeds the
+  recurrence interval.
+- UTC-12, UTC+14, DST-gap, and DST-overlap delivery intent maps to no more than one UTC
+  instant and one delivery key.
+- Cancellation, archive, subscription opt-out, and account pause suppress reminders.
 
 ## 14. Invalid Inputs
 
@@ -333,4 +406,7 @@ Reject:
 - Business-day adjustment for weekends or holidays.
 - Provider-specific billing calendars.
 - Historical or transaction-date FX valuation.
+- Automatic email opt-in based on amount, currency, payment method, or an inferred
+  manual-renewal status.
+- Multiple reminder emails for one subscription occurrence.
 - User-entered exchange rates.

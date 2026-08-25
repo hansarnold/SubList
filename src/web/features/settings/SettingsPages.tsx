@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
+  IconArrowLeft,
   IconCategory,
   IconChevronDown,
   IconCreditCard,
@@ -14,22 +15,23 @@ import {
 } from "@tabler/icons-react";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
+import { categoriesQueryKey, paymentMethodsQueryKey } from "../../api/query-keys";
+import { useSessionUserId } from "../../api/session";
 import type {
   Category as CategoryType,
-  CommonIconKey,
   ImportResult,
   PaymentMethodKind,
   ResourceSymbol,
   Session,
+  User,
 } from "../../api/types";
 import { CategorySymbol, PaymentMethodSymbol } from "../../components/ResourceSymbol";
 import {
-  SymbolPicker,
-  type EmojiOption,
-  type SymbolPickerLabels,
-} from "../../components/SymbolPicker";
+  CategoryEditorFields,
+  PaymentMethodEditorFields,
+} from "../../components/ResourceEditorFields";
 import {
   Button,
   CategoryPill,
@@ -39,7 +41,6 @@ import {
   LoadingPage,
   QueryError,
 } from "../../components/ui";
-import { COMMON_ICON_KEYS } from "../../../domain/symbol";
 import { normalizeCategoryNameKey } from "../../../domain/text-normalization";
 import {
   CATEGORY_PRESETS,
@@ -61,45 +62,38 @@ function formString(values: FormData, name: string, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
-function useSymbolPickerCopy(): {
-  emojiOptions: readonly EmojiOption[];
-  iconLabels: Readonly<Record<CommonIconKey, string>>;
-  labels: SymbolPickerLabels;
-} {
-  const { t } = useTranslation();
-  const iconLabels = Object.fromEntries(
-    COMMON_ICON_KEYS.map((key) => [key, t(`symbols.icons.${key}`)]),
-  ) as Record<CommonIconKey, string>;
-  return {
-    iconLabels,
-    emojiOptions: [
-      { value: "⭐", label: t("symbols.emojis.star") },
-      { value: "🎬", label: t("symbols.emojis.movie") },
-      { value: "🎵", label: t("symbols.emojis.music") },
-      { value: "☁️", label: t("symbols.emojis.cloud") },
-      { value: "💳", label: t("symbols.emojis.card") },
-      { value: "🧾", label: t("symbols.emojis.receipt") },
-      { value: "✈️", label: t("symbols.emojis.travel") },
-      { value: "🛠️", label: t("symbols.emojis.tools") },
-    ],
-    labels: {
-      legend: t("symbols.legend"),
-      commonIcons: t("symbols.commonIcons"),
-      emoji: t("symbols.emoji"),
-      emojiInput: t("symbols.emojiInput"),
-      emojiInputPlaceholder: t("symbols.emojiInputPlaceholder"),
-      invalidEmoji: t("symbols.invalidEmoji"),
-      clear: t("symbols.clear"),
-    },
-  };
+function safeSettingsReturnDestination(value: string | null) {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return null;
+  try {
+    const parsed = new URL(value, "https://opensublists.invalid");
+    if (parsed.origin !== "https://opensublists.invalid" || parsed.hash) return null;
+    if (`${parsed.pathname}${parsed.search}` !== value) return null;
+    const isSubscriptionForm =
+      parsed.pathname === "/subscriptions/new" ||
+      /^\/subscriptions\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/edit$/i.test(
+        parsed.pathname,
+      );
+    return isSubscriptionForm ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export function SettingsLayout() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const returnTo = safeSettingsReturnDestination(searchParams.get("from"));
+  const returnSearch = returnTo ? `?from=${encodeURIComponent(returnTo)}` : "";
   return (
     <div className="page page--settings">
       <header className="page-header">
         <div>
+          {returnTo ? (
+            <Link className="back-link" to={returnTo}>
+              <IconArrowLeft size={19} aria-hidden="true" />
+              {t("app.back")}
+            </Link>
+          ) : null}
           <p className="page-eyebrow">{t("app.name")}</p>
           <h1>{t("settings.title")}</h1>
         </div>
@@ -107,7 +101,11 @@ export function SettingsLayout() {
       <div className="settings-layout">
         <nav className="settings-nav" aria-label={t("settings.title")}>
           {settingsNav.map(({ to, key, icon: Icon }) => (
-            <NavLink key={to} to={to} className={({ isActive }) => (isActive ? "is-active" : "")}>
+            <NavLink
+              key={to}
+              to={`${to}${returnSearch}`}
+              className={({ isActive }) => (isActive ? "is-active" : "")}
+            >
               <Icon size={19} />
               {t(key)}
             </NavLink>
@@ -126,6 +124,10 @@ export function ProfileSettingsPage() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ["me"], queryFn: api.me });
   const sessionQuery = useQuery({ queryKey: ["session"], queryFn: api.session });
+  const [preferredLocaleDraft, setPreferredLocaleDraft] = useState<User["preferredLocale"] | null>(
+    null,
+  );
+  const [emailRemindersPausedDraft, setEmailRemindersPausedDraft] = useState<boolean | null>(null);
   const mutation = useMutation({
     mutationFn: api.updateMe,
     onSuccess: async (user) => {
@@ -133,7 +135,13 @@ export function ProfileSettingsPage() {
       queryClient.setQueryData<Session | undefined>(["session"], (current) =>
         current ? { ...current, user } : current,
       );
-      await queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      setPreferredLocaleDraft(null);
+      setEmailRemindersPausedDraft(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+      ]);
     },
   });
 
@@ -144,7 +152,13 @@ export function ProfileSettingsPage() {
   }
 
   const user = query.data;
+  const preferredLocale = preferredLocaleDraft ?? user.preferredLocale;
+  const emailRemindersPaused = emailRemindersPausedDraft ?? user.emailRemindersPaused;
   const isLocalEnvironment = sessionQuery.data.environment === "local";
+  const emailRemindersAvailable = sessionQuery.data.capabilities.emailReminders;
+  const interfaceLocale: User["preferredLocale"] = i18n.language.startsWith("zh")
+    ? "zh-Hans"
+    : "en";
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
@@ -156,6 +170,20 @@ export function ProfileSettingsPage() {
         "reportingCurrency",
         user.reportingCurrency,
       ).toUpperCase(),
+      preferredLocale,
+      defaultEmailReminderDaysBefore: Number(
+        formString(
+          values,
+          "defaultEmailReminderDaysBefore",
+          String(user.defaultEmailReminderDaysBefore),
+        ),
+      ),
+      emailReminderLocalTime: formString(
+        values,
+        "emailReminderLocalTime",
+        user.emailReminderLocalTime,
+      ),
+      emailRemindersPaused,
     });
   }
 
@@ -171,6 +199,31 @@ export function ProfileSettingsPage() {
         <InlineNotice tone="danger">{mutation.error.message}</InlineNotice>
       ) : null}
       {mutation.isSuccess ? <InlineNotice tone="success">{t("app.save")}</InlineNotice> : null}
+      {!emailRemindersAvailable ? (
+        <InlineNotice tone="warning">{t("settings.reminderCapabilityUnavailable")}</InlineNotice>
+      ) : null}
+      {user.emailReminderSystemSuspended ? (
+        <InlineNotice tone="danger">{t("settings.reminderSystemSuspended")}</InlineNotice>
+      ) : null}
+      {interfaceLocale !== preferredLocale ? (
+        <InlineNotice>
+          <div className="inline-notice__split">
+            <span>
+              {t("settings.localeHandoff", {
+                interfaceLanguage:
+                  interfaceLocale === "zh-Hans" ? t("app.chinese") : t("app.english"),
+              })}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setPreferredLocaleDraft(interfaceLocale)}
+            >
+              {t("settings.useInterfaceLanguage")}
+            </Button>
+          </div>
+        </InlineNotice>
+      ) : null}
       <form className="settings-form" onSubmit={submit}>
         <Field label={t("settings.email")}>
           <input value={user.email} readOnly disabled />
@@ -192,33 +245,91 @@ export function ProfileSettingsPage() {
             />
           </Field>
         </div>
+        <fieldset className="settings-reminders">
+          <legend>{t("settings.renewalEmailSettings")}</legend>
+          <p>{t("settings.renewalEmailSettingsHelp")}</p>
+          <div className="field-row">
+            <Field
+              label={t("settings.defaultReminderDays")}
+              hint={t("settings.defaultReminderDaysHint")}
+            >
+              <input
+                name="defaultEmailReminderDaysBefore"
+                type="number"
+                min={0}
+                max={365}
+                inputMode="numeric"
+                defaultValue={user.defaultEmailReminderDaysBefore}
+                required
+              />
+            </Field>
+            <Field
+              label={t("settings.reminderLocalTime")}
+              hint={t("settings.reminderLocalTimeHint", { timeZone: user.timezone })}
+            >
+              <span className="select-wrap">
+                <select name="emailReminderLocalTime" defaultValue={user.emailReminderLocalTime}>
+                  {Array.from({ length: 24 }, (_, hour) => {
+                    const value = `${String(hour).padStart(2, "0")}:00`;
+                    return (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    );
+                  })}
+                </select>
+                <IconChevronDown size={17} />
+              </span>
+            </Field>
+          </div>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={emailRemindersPaused}
+              disabled={
+                user.emailRemindersPaused &&
+                (!emailRemindersAvailable || user.emailReminderSystemSuspended)
+              }
+              onChange={(event) => setEmailRemindersPausedDraft(event.target.checked)}
+            />
+            <span>
+              <strong>{t("settings.pauseAllReminders")}</strong>
+              <small>{t("settings.pauseAllRemindersHint")}</small>
+            </span>
+          </label>
+        </fieldset>
+
+        <div className="settings-language settings-language--in-form">
+          <div>
+            <IconLanguage size={21} />
+            <div>
+              <h3>{t("settings.languageAndAppearance")}</h3>
+              <p>{t("settings.emailLanguageHint")}</p>
+            </div>
+          </div>
+          <label className="select-wrap">
+            <span className="sr-only">{t("app.language")}</span>
+            <select
+              name="preferredLocale"
+              value={preferredLocale}
+              onChange={(event) => {
+                const locale = event.target.value as User["preferredLocale"];
+                setPreferredLocaleDraft(locale);
+                void setLanguage(locale);
+              }}
+            >
+              <option value="en">{t("app.english")}</option>
+              <option value="zh-Hans">{t("app.chinese")}</option>
+            </select>
+            <IconChevronDown size={17} />
+          </label>
+        </div>
         <div className="settings-form__actions">
           <Button type="submit" disabled={mutation.isPending}>
             {mutation.isPending ? t("app.saving") : t("app.save")}
           </Button>
         </div>
       </form>
-
-      <div className="settings-language">
-        <div>
-          <IconLanguage size={21} />
-          <div>
-            <h3>{t("settings.languageAndAppearance")}</h3>
-            <p>{t("app.language")}</p>
-          </div>
-        </div>
-        <label className="select-wrap">
-          <span className="sr-only">{t("app.language")}</span>
-          <select
-            value={i18n.language.startsWith("zh") ? "zh-Hans" : "en"}
-            onChange={(event) => void setLanguage(event.target.value as "en" | "zh-Hans")}
-          >
-            <option value="en">{t("app.english")}</option>
-            <option value="zh-Hans">{t("app.chinese")}</option>
-          </select>
-          <IconChevronDown size={17} />
-        </label>
-      </div>
 
       <div className="settings-signout">
         <div>
@@ -242,8 +353,12 @@ export function ProfileSettingsPage() {
 export function CategorySettingsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["categories"], queryFn: api.categories });
-  const symbolPicker = useSymbolPickerCopy();
+  const userId = useSessionUserId();
+  const query = useQuery({
+    queryKey: categoriesQueryKey(userId),
+    queryFn: api.categories,
+    enabled: userId !== "pending",
+  });
   const [editing, setEditing] = useState<CategoryType | null>(null);
   const [deleting, setDeleting] = useState<CategoryType | null>(null);
   const [symbol, setSymbol] = useState<ResourceSymbol>(null);
@@ -273,8 +388,9 @@ export function CategorySettingsPage() {
       setSymbol(null);
       setFormRevision((value) => value + 1);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["categories"] }),
+        queryClient.invalidateQueries({ queryKey: categoriesQueryKey(userId) }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
@@ -300,8 +416,9 @@ export function CategorySettingsPage() {
     onSuccess: async () => {
       setSelectedPresetKeys(new Set());
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["categories"] }),
+        queryClient.invalidateQueries({ queryKey: categoriesQueryKey(userId) }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
@@ -311,8 +428,9 @@ export function CategorySettingsPage() {
     onSuccess: async () => {
       setDeleting(null);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["categories"] }),
+        queryClient.invalidateQueries({ queryKey: categoriesQueryKey(userId) }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
@@ -423,13 +541,13 @@ export function CategorySettingsPage() {
       </section>
 
       <form className="resource-form" onSubmit={submit} key={editing?.id ?? `new-${formRevision}`}>
-        <Field label={t("settings.categoryName")}>
-          <input name="name" maxLength={80} defaultValue={editing?.name ?? ""} required />
-        </Field>
-        <Field label={t("settings.color")}>
-          <input name="color" type="color" defaultValue={editing?.color ?? "#3b82f6"} />
-        </Field>
-        <SymbolPicker value={symbol} onChange={setSymbol} {...symbolPicker} />
+        <CategoryEditorFields
+          defaultName={editing?.name ?? ""}
+          defaultColor={editing?.color ?? "#3b82f6"}
+          symbol={symbol}
+          onSymbolChange={setSymbol}
+          disabled={mutation.isPending}
+        />
         <Button type="submit" disabled={mutation.isPending}>
           {editing ? (
             t("app.save")
@@ -487,8 +605,12 @@ export function CategorySettingsPage() {
 export function PaymentMethodSettingsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ["payment-methods"], queryFn: api.paymentMethods });
-  const symbolPicker = useSymbolPickerCopy();
+  const userId = useSessionUserId();
+  const query = useQuery({
+    queryKey: paymentMethodsQueryKey(userId),
+    queryFn: api.paymentMethods,
+    enabled: userId !== "pending",
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [symbol, setSymbol] = useState<ResourceSymbol>(null);
@@ -530,8 +652,9 @@ export function PaymentMethodSettingsPage() {
       setSymbol(null);
       setFormRevision((value) => value + 1);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["payment-methods"] }),
+        queryClient.invalidateQueries({ queryKey: paymentMethodsQueryKey(userId) }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
@@ -541,8 +664,10 @@ export function PaymentMethodSettingsPage() {
     onSuccess: async () => {
       setDeletingId(null);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["payment-methods"] }),
+        queryClient.invalidateQueries({ queryKey: paymentMethodsQueryKey(userId) }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
+        queryClient.invalidateQueries({ queryKey: ["subscription"] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
     },
   });
@@ -632,35 +757,14 @@ export function PaymentMethodSettingsPage() {
         onSubmit={submit}
         key={editing?.id ?? presetDraft?.revision ?? `new-${formRevision}`}
       >
-        <Field label={t("settings.paymentName")}>
-          <input
-            name="name"
-            maxLength={80}
-            defaultValue={editing?.name ?? presetDraft?.name ?? ""}
-            required
-          />
-        </Field>
-        <Field label={t("settings.paymentKind")}>
-          <span className="select-wrap">
-            <select name="kind" defaultValue={editing?.kind ?? presetDraft?.preset.kind ?? "card"}>
-              {(["card", "wallet", "bank", "store", "other"] as const).map((kind) => (
-                <option value={kind} key={kind}>
-                  {t(`settings.kinds.${kind}`)}
-                </option>
-              ))}
-            </select>
-            <IconChevronDown size={17} />
-          </span>
-        </Field>
-        <Field label={t("settings.paymentLabel")}>
-          <input
-            name="label"
-            maxLength={80}
-            defaultValue={editing?.label ?? ""}
-            placeholder={t("settings.paymentLabelPlaceholder")}
-          />
-        </Field>
-        <SymbolPicker value={symbol} onChange={setSymbol} {...symbolPicker} />
+        <PaymentMethodEditorFields
+          defaultName={editing?.name ?? presetDraft?.name ?? ""}
+          defaultKind={editing?.kind ?? presetDraft?.preset.kind ?? "card"}
+          defaultLabel={editing?.label ?? ""}
+          symbol={symbol}
+          onSymbolChange={setSymbol}
+          disabled={mutation.isPending}
+        />
         <Button type="submit" disabled={mutation.isPending}>
           {editing || presetDraft ? (
             t("app.save")
@@ -750,6 +854,8 @@ export function DataSettingsPage() {
 
   async function selectFile(file: File | undefined) {
     setFileError(null);
+    setArchive(null);
+    setFileName("");
     previewMutation.reset();
     importMutation.reset();
     if (!file) return;
@@ -762,10 +868,20 @@ export function DataSettingsPage() {
       setArchive(parsed);
       setFileName(file.name);
     } catch {
-      setArchive(null);
-      setFileName("");
       setFileError(t("settings.invalidArchive"));
     }
+  }
+
+  function changeStrategy(next: typeof strategy) {
+    setStrategy(next);
+    previewMutation.reset();
+    importMutation.reset();
+  }
+
+  function changeImportProfile(next: boolean) {
+    setImportProfile(next);
+    previewMutation.reset();
+    importMutation.reset();
   }
 
   const preview = previewMutation.data;
@@ -809,9 +925,39 @@ export function DataSettingsPage() {
         {previewMutation.isError ? (
           <InlineNotice tone="danger">{previewMutation.error.message}</InlineNotice>
         ) : null}
+        <Field label={t("settings.strategy")}>
+          <span className="select-wrap">
+            <select
+              value={strategy}
+              onChange={(event) => changeStrategy(event.target.value as typeof strategy)}
+            >
+              <option value="skip">{t("settings.skip")}</option>
+              <option value="overwrite">{t("settings.overwrite")}</option>
+              <option value="duplicate">{t("settings.duplicate")}</option>
+            </select>
+            <IconChevronDown size={17} />
+          </span>
+        </Field>
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={importProfile}
+            onChange={(event) => changeImportProfile(event.target.checked)}
+          />
+          <span>
+            <strong>{t("settings.importProfile")}</strong>
+          </span>
+        </label>
         <Button
           disabled={!archive || previewMutation.isPending}
-          onClick={() => archive && previewMutation.mutate(archive)}
+          onClick={() =>
+            archive &&
+            previewMutation.mutate({
+              archive,
+              conflictStrategy: strategy,
+              importProfile,
+            })
+          }
         >
           {previewMutation.isPending ? t("settings.previewing") : t("settings.previewImport")}
         </Button>
@@ -848,29 +994,7 @@ export function DataSettingsPage() {
                 ))}
               </ul>
             ) : null}
-            <Field label={t("settings.strategy")}>
-              <span className="select-wrap">
-                <select
-                  value={strategy}
-                  onChange={(event) => setStrategy(event.target.value as typeof strategy)}
-                >
-                  <option value="skip">{t("settings.skip")}</option>
-                  <option value="overwrite">{t("settings.overwrite")}</option>
-                  <option value="duplicate">{t("settings.duplicate")}</option>
-                </select>
-                <IconChevronDown size={17} />
-              </span>
-            </Field>
-            <label className="checkbox-field">
-              <input
-                type="checkbox"
-                checked={importProfile}
-                onChange={(event) => setImportProfile(event.target.checked)}
-              />
-              <span>
-                <strong>{t("settings.importProfile")}</strong>
-              </span>
-            </label>
+            <ReminderImportImpact impact={preview.reminderImpact} />
             {importMutation.isError ? (
               <InlineNotice tone="danger">{importMutation.error.message}</InlineNotice>
             ) : null}
@@ -889,6 +1013,32 @@ function importResourceCount(
   counts: ImportResult["created"] | ImportResult["updated"] | ImportResult["skipped"],
 ): number {
   return counts.categories + counts.paymentMethods + counts.subscriptions;
+}
+
+function ReminderImportImpact({ impact }: { impact: ImportResult["reminderImpact"] }) {
+  const { t } = useTranslation();
+  return (
+    <section className="import-reminder-impact">
+      <h4>{t("settings.reminderImportImpact")}</h4>
+      <dl>
+        <div>
+          <dt>{t("settings.enabledReminderPreferences")}</dt>
+          <dd>{impact.enabledPreferencesAfterApply}</dd>
+        </div>
+        <div>
+          <dt>{t("settings.emailSender")}</dt>
+          <dd>
+            {impact.senderCapabilityAvailable
+              ? t("settings.emailSenderAvailable")
+              : t("settings.emailSenderUnavailable")}
+          </dd>
+        </div>
+      </dl>
+      {impact.willForceGlobalPause ? (
+        <InlineNotice tone="warning">{t("settings.importWillPauseReminders")}</InlineNotice>
+      ) : null}
+    </section>
+  );
 }
 
 export function ImportResultSummary({ result }: { result: ImportResult }) {
@@ -913,6 +1063,7 @@ export function ImportResultSummary({ result }: { result: ImportResult }) {
           </div>
         ))}
       </div>
+      <ReminderImportImpact impact={result.reminderImpact} />
       {result.warnings.length ? (
         <ul>
           {result.warnings.map((warning, index) => (

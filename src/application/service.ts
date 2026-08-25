@@ -1,6 +1,9 @@
 import {
   assertCurrencyCode,
   assertIanaTimeZone,
+  assertReminderDaysBefore,
+  assertReminderLocale,
+  assertReminderLocalTime,
   buildDashboardStatistics,
   buildReportingTotals,
   calculateNextBillingOn,
@@ -20,9 +23,10 @@ import type {
   Dashboard,
   ImportPreview,
   ImportResult,
-  OpenSubListsArchiveV2,
+  OpenSubListsArchiveV3,
   PaymentMethod,
   Subscription,
+  SubscriptionDetail,
   User,
 } from "../shared/api-types";
 import type {
@@ -31,6 +35,7 @@ import type {
   CreatePaymentMethodInput,
   CreateSubscriptionInput,
   ImportRequest,
+  ImportPreviewRequest,
   UpdateCategoryInput,
   UpdatePaymentMethodInput,
   UpdateSubscriptionInput,
@@ -45,8 +50,14 @@ import type {
   ExistingImportState,
   SubscriptionListFilter,
 } from "./models";
-import type { ImportMutation, OpenSubListsRepository } from "./ports";
+import type { ImportMutation, OpenSubListsRepository, ReminderStore } from "./ports";
 import { ApplicationError, conflict, notFound } from "./errors";
+import { deriveRenewalEmailDeliverySummary } from "./reminder-service";
+
+export type ReminderApplicationOptions = {
+  emailRemindersAvailable: boolean;
+  reminderStore?: ReminderStore;
+};
 
 const ARCHIVE_KEYS = new Set([
   "format",
@@ -71,6 +82,9 @@ export class OpenSubListsService {
     private readonly repository: OpenSubListsRepository,
     private readonly now: () => number = Date.now,
     private readonly refreshFxSnapshot?: () => Promise<FxSnapshot>,
+    private readonly reminderOptions: ReminderApplicationOptions = {
+      emailRemindersAvailable: false,
+    },
   ) {}
 
   resolveUser(identity: AuthenticatedIdentity): Promise<AppUser> {
@@ -90,12 +104,39 @@ export class OpenSubListsService {
   async updateMe(userId: string, input: UpdateUserInput): Promise<User> {
     if (input.reportingCurrency !== undefined) assertCurrencyCode(input.reportingCurrency);
     if (input.timezone !== undefined) assertIanaTimeZone(input.timezone);
+    if (input.preferredLocale !== undefined) assertReminderLocale(input.preferredLocale);
+    if (input.defaultEmailReminderDaysBefore !== undefined) {
+      assertReminderDaysBefore(input.defaultEmailReminderDaysBefore);
+    }
+    if (input.emailReminderLocalTime !== undefined) {
+      assertReminderLocalTime(input.emailReminderLocalTime);
+    }
     const before = await this.requireUser(userId);
+    if (before.emailRemindersPaused && input.emailRemindersPaused === false) {
+      if (before.emailReminderSuspensionReason !== null) {
+        throw new ApplicationError(
+          "EMAIL_REMINDERS_SUSPENDED",
+          "Email reminders are suspended until an operator resolves the account safety check.",
+          409,
+        );
+      }
+      this.assertEmailRemindersAvailable();
+    }
     const now = this.now();
-    const patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">> = {};
+    const patch: Parameters<OpenSubListsRepository["updateUser"]>[1] = {};
     if (input.displayName !== undefined) patch.displayName = input.displayName;
     if (input.timezone !== undefined) patch.timezone = input.timezone;
     if (input.reportingCurrency !== undefined) patch.reportingCurrency = input.reportingCurrency;
+    if (input.preferredLocale !== undefined) patch.preferredLocale = input.preferredLocale;
+    if (input.defaultEmailReminderDaysBefore !== undefined) {
+      patch.defaultEmailReminderDaysBefore = input.defaultEmailReminderDaysBefore;
+    }
+    if (input.emailReminderLocalTime !== undefined) {
+      patch.emailReminderLocalTime = input.emailReminderLocalTime;
+    }
+    if (input.emailRemindersPaused !== undefined) {
+      patch.emailRemindersPaused = input.emailRemindersPaused;
+    }
     let updated: AppUser | null;
     if (input.timezone !== undefined && input.timezone !== before.timezone) {
       updated = await this.repository.updateUserWithReconciliation(
@@ -192,7 +233,9 @@ export class OpenSubListsService {
   }
 
   async deleteCategory(userId: string, id: string): Promise<void> {
-    if (!(await this.repository.deleteCategory(userId, id))) throw notFound("Category");
+    if (!(await this.repository.deleteCategory(userId, id, this.now()))) {
+      throw notFound("Category");
+    }
   }
 
   async listPaymentMethods(userId: string): Promise<PaymentMethod[]> {
@@ -241,7 +284,9 @@ export class OpenSubListsService {
   }
 
   async deletePaymentMethod(userId: string, id: string): Promise<void> {
-    if (!(await this.repository.deletePaymentMethod(userId, id))) throw notFound("Payment method");
+    if (!(await this.repository.deletePaymentMethod(userId, id, this.now()))) {
+      throw notFound("Payment method");
+    }
   }
 
   async listSubscriptions(userId: string, filter: SubscriptionListFilter): Promise<Subscription[]> {
@@ -250,16 +295,34 @@ export class OpenSubListsService {
     return (await this.reconcileRows(userId, subscriptions, user.timezone)).map(toApiSubscription);
   }
 
-  async getSubscription(userId: string, id: string): Promise<Subscription> {
+  async getSubscription(userId: string, id: string): Promise<SubscriptionDetail> {
     const user = await this.requireUser(userId);
     const subscription = await this.repository.getSubscription(userId, id);
     if (subscription === null) throw notFound("Subscription");
     const [reconciled] = await this.reconcileRows(userId, [subscription], user.timezone);
     if (reconciled === undefined) throw notFound("Subscription");
-    return toApiSubscription(reconciled);
+    const deliveries =
+      this.reminderOptions.reminderStore === undefined
+        ? []
+        : await this.reminderOptions.reminderStore.listSubscriptionReminderDeliveries(
+            userId,
+            id,
+            20,
+          );
+    return {
+      ...toApiSubscription(reconciled),
+      emailReminderDelivery: deriveRenewalEmailDeliverySummary({
+        user,
+        subscription: reconciled,
+        deliveries,
+        senderCapabilityAvailable: this.reminderOptions.emailRemindersAvailable,
+        now: this.now(),
+      }),
+    };
   }
 
   async createSubscription(userId: string, input: CreateSubscriptionInput): Promise<Subscription> {
+    if (input.emailReminderEnabled) this.assertEmailRemindersAvailable();
     const user = await this.requireUser(userId);
     await this.validateRelationships(userId, input.categoryId, input.paymentMethodId);
     const now = this.now();
@@ -288,6 +351,9 @@ export class OpenSubListsService {
         paymentMethodId: input.paymentMethodId,
         websiteUrl: input.websiteUrl,
         notes: input.notes,
+        emailReminderEnabled: input.emailReminderEnabled,
+        emailReminderDaysBefore: input.emailReminderDaysBefore,
+        emailReminderRevision: 0,
         createdAt: now,
         updatedAt: now,
       });
@@ -312,6 +378,9 @@ export class OpenSubListsService {
       this.requireUser(userId),
     ]);
     if (current === null) throw notFound("Subscription");
+    if (input.emailReminderEnabled === true && !current.emailReminderEnabled) {
+      this.assertEmailRemindersAvailable();
+    }
     const categoryId = input.categoryId === undefined ? current.categoryId : input.categoryId;
     const paymentMethodId =
       input.paymentMethodId === undefined ? current.paymentMethodId : input.paymentMethodId;
@@ -334,10 +403,22 @@ export class OpenSubListsService {
       ...(input.paymentMethodId === undefined ? {} : { paymentMethodId: input.paymentMethodId }),
       ...(input.websiteUrl === undefined ? {} : { websiteUrl: input.websiteUrl }),
       ...(input.notes === undefined ? {} : { notes: input.notes }),
+      ...(input.emailReminderEnabled === undefined
+        ? {}
+        : { emailReminderEnabled: input.emailReminderEnabled }),
+      ...(input.emailReminderDaysBefore === undefined
+        ? {}
+        : { emailReminderDaysBefore: input.emailReminderDaysBefore }),
       nextBillingOn,
       updatedAt: now,
     };
-    const saved = await this.repository.updateSubscription(userId, updated);
+    updated.emailReminderRevision = nextSubscriptionReminderRevision(current, updated);
+    const saved = await this.repository.updateSubscription(
+      userId,
+      updated,
+      current.updatedAt,
+      current.emailReminderRevision,
+    );
     if (saved === null) throw notFound("Subscription");
     return toApiSubscription(saved);
   }
@@ -522,6 +603,11 @@ export class OpenSubListsService {
         paymentMethodKind: breakdown.paymentMethodKind,
         paymentMethodSymbol: breakdown.symbol,
         subscriptionCount: breakdown.subscriptionCount,
+        totalsByCurrency: breakdown.totalsByCurrency.map((total) => ({
+          currency: total.currency,
+          monthlyEstimate: formatRationalMicrosAsAmount(total.monthlyEstimateMicros),
+          annualizedEstimate: formatRationalMicrosAsAmount(total.annualizedEstimateMicros),
+        })),
         ...toBreakdownReporting(
           breakdown.totalsByCurrency,
           user.reportingCurrency,
@@ -533,16 +619,13 @@ export class OpenSubListsService {
     };
   }
 
-  async exportArchive(userId: string): Promise<OpenSubListsArchiveV2> {
-    const [user, categories, paymentMethods, subscriptions] = await Promise.all([
-      this.requireUser(userId),
-      this.repository.listCategories(userId),
-      this.repository.listPaymentMethods(userId),
-      this.repository.listAllSubscriptions(userId),
-    ]);
+  async exportArchive(userId: string): Promise<OpenSubListsArchiveV3> {
+    const { user, categories, paymentMethods, subscriptions } =
+      await this.repository.readExportSnapshot(userId);
+    if (user === null) throw notFound("User");
     return {
       format: "opensublists",
-      schemaVersion: 2,
+      schemaVersion: 3,
       archiveId: crypto.randomUUID(),
       exportedAt: new Date(this.now()).toISOString(),
       generator: { name: "OpenSubLists", version: "0.1.0" },
@@ -550,6 +633,10 @@ export class OpenSubListsService {
         displayName: user.displayName,
         timezone: user.timezone,
         reportingCurrency: user.reportingCurrency,
+        preferredLocale: user.preferredLocale,
+        defaultEmailReminderDaysBefore: user.defaultEmailReminderDaysBefore,
+        emailReminderLocalTime: user.emailReminderLocalTime,
+        emailRemindersPaused: user.emailRemindersPaused,
       },
       categories: categories.sort(comparePositionAndId).map(toApiCategory),
       paymentMethods: paymentMethods.sort(comparePositionAndId).map(toApiPaymentMethod),
@@ -559,45 +646,57 @@ export class OpenSubListsService {
     };
   }
 
-  async previewImport(userId: string, source: Record<string, unknown>): Promise<ImportPreview> {
-    const archive = canonicalArchive(source);
-    const warnings = unknownTopLevelWarnings(source);
+  async previewImport(userId: string, request: ImportPreviewRequest): Promise<ImportPreview> {
+    const archive = canonicalArchive(request.archive);
+    const warnings = unknownTopLevelWarnings(request.archive);
     validateArchiveRelationships(archive);
     const state = await this.repository.getImportState(userId);
-    validateCategoryNameConflicts(archive, state, "skip");
+    validateImportCapacity(archive, state, request.conflictStrategy);
+    validateCategoryNameConflicts(archive, state, request.conflictStrategy);
+    const review = importReviewContext(
+      archive,
+      state,
+      request.conflictStrategy,
+      request.importProfile,
+      this.reminderOptions.emailRemindersAvailable,
+    );
     return {
-      digest: await archiveDigest(archive),
-      schemaVersion: 2,
+      digest: await importApprovalDigest(archive, review),
+      schemaVersion: 3,
       counts: {
         categories: archive.categories.length,
         paymentMethods: archive.paymentMethods.length,
         subscriptions: archive.subscriptions.length,
       },
-      conflicts: {
-        categories: countConflicts(archive.categories, state.categoryIds),
-        paymentMethods: countConflicts(archive.paymentMethods, state.paymentMethodIds),
-        subscriptions: countConflicts(archive.subscriptions, state.subscriptionIds),
-      },
+      conflicts: review.conflicts,
       warnings,
+      reminderImpact: review.reminderImpact,
     };
   }
 
   async importArchive(userId: string, request: ImportRequest): Promise<ImportResult> {
     const archive = canonicalArchive(request.archive);
     validateArchiveRelationships(archive);
-    if ((await archiveDigest(archive)) !== request.expectedDigest) {
-      throw new ApplicationError(
-        "IMPORT_DIGEST_MISMATCH",
-        "The archive no longer matches the previewed file.",
-        409,
-      );
-    }
     const [state, user] = await Promise.all([
       this.repository.getImportState(userId),
       this.requireUser(userId),
     ]);
     validateImportCapacity(archive, state, request.conflictStrategy);
     validateCategoryNameConflicts(archive, state, request.conflictStrategy);
+    const review = importReviewContext(
+      archive,
+      state,
+      request.conflictStrategy,
+      request.importProfile,
+      this.reminderOptions.emailRemindersAvailable,
+    );
+    if ((await importApprovalDigest(archive, review)) !== request.expectedDigest) {
+      throw new ApplicationError(
+        "IMPORT_DIGEST_MISMATCH",
+        "The archive or reviewed import conditions no longer match the preview. Run preview again.",
+        409,
+      );
+    }
     const now = this.now();
     const result = emptyImportResult(unknownTopLevelWarnings(request.archive));
     const duplicateIds = createDuplicateIdMaps(archive, request.conflictStrategy);
@@ -686,6 +785,9 @@ export class OpenSubListsService {
                 subscription.paymentMethodId),
           websiteUrl: subscription.websiteUrl,
           notes: subscription.notes,
+          emailReminderEnabled: subscription.emailReminderEnabled,
+          emailReminderDaysBefore: subscription.emailReminderDaysBefore,
+          emailReminderRevision: 0,
           createdAt: Date.parse(subscription.createdAt),
           updatedAt: Date.parse(subscription.updatedAt),
         },
@@ -694,19 +796,34 @@ export class OpenSubListsService {
     }
 
     try {
-      await this.repository.applyImport(
+      const applyOutcome = await this.repository.applyImport(
         userId,
+        { user, resourceRevision: state.resourceRevision },
         mutations,
         request.importProfile
           ? {
               displayName: archive.profile.displayName,
               timezone: archive.profile.timezone,
               reportingCurrency: assertCurrencyCode(archive.profile.reportingCurrency),
+              preferredLocale: assertReminderLocale(archive.profile.preferredLocale),
+              defaultEmailReminderDaysBefore: assertReminderDaysBefore(
+                archive.profile.defaultEmailReminderDaysBefore,
+              ),
+              emailReminderLocalTime: assertReminderLocalTime(
+                archive.profile.emailReminderLocalTime,
+              ),
+              emailRemindersPaused: archive.profile.emailRemindersPaused,
             }
           : null,
         reconciliationUpdates,
         now,
+        !this.reminderOptions.emailRemindersAvailable,
       );
+      result.reminderImpact = {
+        enabledPreferencesAfterApply: applyOutcome.enabledPreferencesAfterApply,
+        senderCapabilityAvailable: this.reminderOptions.emailRemindersAvailable,
+        willForceGlobalPause: applyOutcome.forcedGlobalPause,
+      };
     } catch (error) {
       const resourceLimitError = mapResourceLimitError(error);
       if (resourceLimitError !== null) throw resourceLimitError;
@@ -763,9 +880,25 @@ export class OpenSubListsService {
     const current = await this.repository.getSubscription(userId, id);
     if (current === null) throw notFound("Subscription");
     const next = mutate(current, this.now());
-    const updated = await this.repository.updateSubscription(userId, next);
+    next.emailReminderRevision = nextSubscriptionReminderRevision(current, next);
+    const updated = await this.repository.updateSubscription(
+      userId,
+      next,
+      current.updatedAt,
+      current.emailReminderRevision,
+    );
     if (updated === null) throw notFound("Subscription");
     return toApiSubscription(updated);
+  }
+
+  private assertEmailRemindersAvailable(): void {
+    if (!this.reminderOptions.emailRemindersAvailable) {
+      throw new ApplicationError(
+        "EMAIL_REMINDERS_UNAVAILABLE",
+        "Email reminders are not available in this deployment.",
+        409,
+      );
+    }
   }
 
   private async reconcileRows(
@@ -842,6 +975,11 @@ export function toApiUser(value: AppUser): User {
       value.onboardingCompletedAt === null
         ? null
         : new Date(value.onboardingCompletedAt).toISOString(),
+    preferredLocale: value.preferredLocale,
+    defaultEmailReminderDaysBefore: value.defaultEmailReminderDaysBefore,
+    emailReminderLocalTime: value.emailReminderLocalTime,
+    emailRemindersPaused: value.emailRemindersPaused,
+    emailReminderSystemSuspended: value.emailReminderSuspensionReason !== null,
     createdAt: new Date(value.createdAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
   };
@@ -890,6 +1028,8 @@ function toApiSubscription(
     paymentMethodId: value.paymentMethodId,
     websiteUrl: value.websiteUrl,
     notes: value.notes,
+    emailReminderEnabled: value.emailReminderEnabled,
+    emailReminderDaysBefore: value.emailReminderDaysBefore,
     createdAt: new Date(value.createdAt).toISOString(),
     updatedAt: new Date(value.updatedAt).toISOString(),
   };
@@ -911,6 +1051,8 @@ function toArchiveSubscription(value: AppSubscription): Omit<Subscription, "next
     paymentMethodId: subscription.paymentMethodId,
     websiteUrl: subscription.websiteUrl,
     notes: subscription.notes,
+    emailReminderEnabled: subscription.emailReminderEnabled,
+    emailReminderDaysBefore: subscription.emailReminderDaysBefore,
     createdAt: subscription.createdAt,
     updatedAt: subscription.updatedAt,
   };
@@ -930,11 +1072,11 @@ function comparePositionAndId<T extends { position: number; id: string }>(
   return left.position - right.position || left.id.localeCompare(right.id);
 }
 
-function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV2 {
-  const archive = source as OpenSubListsArchiveV2;
+function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV3 {
+  const archive = source as OpenSubListsArchiveV3;
   return {
     format: "opensublists",
-    schemaVersion: 2,
+    schemaVersion: 3,
     archiveId: archive.archiveId,
     exportedAt: new Date(archive.exportedAt).toISOString(),
     generator: { name: "OpenSubLists", version: archive.generator.version },
@@ -942,6 +1084,12 @@ function canonicalArchive(source: Record<string, unknown>): OpenSubListsArchiveV
       displayName: archive.profile.displayName,
       timezone: assertIanaTimeZone(archive.profile.timezone),
       reportingCurrency: assertCurrencyCode(archive.profile.reportingCurrency),
+      preferredLocale: assertReminderLocale(archive.profile.preferredLocale),
+      defaultEmailReminderDaysBefore: assertReminderDaysBefore(
+        archive.profile.defaultEmailReminderDaysBefore,
+      ),
+      emailReminderLocalTime: assertReminderLocalTime(archive.profile.emailReminderLocalTime),
+      emailRemindersPaused: archive.profile.emailRemindersPaused,
     },
     categories: archive.categories.map((category) => ({
       ...category,
@@ -974,7 +1122,7 @@ function buildReconciliationUpdates(
 }
 
 function validateImportCapacity(
-  archive: OpenSubListsArchiveV2,
+  archive: OpenSubListsArchiveV3,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): void {
@@ -1021,7 +1169,7 @@ function mapResourceLimitError(error: unknown): ApplicationError | null {
   return null;
 }
 
-function validateArchiveRelationships(archive: OpenSubListsArchiveV2): void {
+function validateArchiveRelationships(archive: OpenSubListsArchiveV3): void {
   const categoryIds = assertUniqueIds(archive.categories, "categories");
   const paymentMethodIds = assertUniqueIds(archive.paymentMethods, "paymentMethods");
   assertUniqueIds(archive.subscriptions, "subscriptions");
@@ -1068,7 +1216,7 @@ function importValidation(path: string, code: string): ApplicationError {
 }
 
 function validateCategoryNameConflicts(
-  archive: OpenSubListsArchiveV2,
+  archive: OpenSubListsArchiveV3,
   state: ExistingImportState,
   strategy: "skip" | "overwrite" | "duplicate",
 ): void {
@@ -1098,8 +1246,46 @@ function unknownTopLevelWarnings(source: Record<string, unknown>) {
     }));
 }
 
-async function archiveDigest(archive: OpenSubListsArchiveV2): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify(archive));
+type ImportReviewContext = {
+  conflictStrategy: ImportPreviewRequest["conflictStrategy"];
+  importProfile: boolean;
+  conflicts: ImportPreview["conflicts"];
+  reminderImpact: ImportPreview["reminderImpact"];
+};
+
+function importReviewContext(
+  archive: OpenSubListsArchiveV3,
+  state: ExistingImportState,
+  conflictStrategy: ImportPreviewRequest["conflictStrategy"],
+  importProfile: boolean,
+  emailRemindersAvailable: boolean,
+): ImportReviewContext {
+  const enabledPreferencesAfterApply = countEnabledPreferencesAfterApply(
+    archive,
+    state,
+    conflictStrategy,
+  );
+  return {
+    conflictStrategy,
+    importProfile,
+    conflicts: {
+      categories: countConflicts(archive.categories, state.categoryIds),
+      paymentMethods: countConflicts(archive.paymentMethods, state.paymentMethodIds),
+      subscriptions: countConflicts(archive.subscriptions, state.subscriptionIds),
+    },
+    reminderImpact: {
+      enabledPreferencesAfterApply,
+      senderCapabilityAvailable: emailRemindersAvailable,
+      willForceGlobalPause: !emailRemindersAvailable && enabledPreferencesAfterApply > 0,
+    },
+  };
+}
+
+async function importApprovalDigest(
+  archive: OpenSubListsArchiveV3,
+  review: ImportReviewContext,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify({ archive, review }));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return `sha256-${[...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, "0"))
@@ -1107,7 +1293,7 @@ async function archiveDigest(archive: OpenSubListsArchiveV2): Promise<string> {
 }
 
 function createDuplicateIdMaps(
-  archive: OpenSubListsArchiveV2,
+  archive: OpenSubListsArchiveV3,
   strategy: "skip" | "overwrite" | "duplicate",
 ) {
   return {
@@ -1135,7 +1321,49 @@ function emptyImportResult(warnings: ImportResult["warnings"]): ImportResult {
     updated: { categories: 0, paymentMethods: 0, subscriptions: 0 },
     skipped: { categories: 0, paymentMethods: 0, subscriptions: 0 },
     warnings,
+    reminderImpact: {
+      enabledPreferencesAfterApply: 0,
+      senderCapabilityAvailable: false,
+      willForceGlobalPause: false,
+    },
   };
+}
+
+function countEnabledPreferencesAfterApply(
+  archive: OpenSubListsArchiveV3,
+  state: ExistingImportState,
+  strategy: "skip" | "overwrite" | "duplicate",
+): number {
+  const final = new Map(state.emailReminderEnabledBySubscriptionId);
+  for (const subscription of archive.subscriptions) {
+    const exists = state.subscriptionIds.has(subscription.id);
+    if (exists && strategy === "skip") continue;
+    if (strategy === "duplicate") {
+      if (subscription.emailReminderEnabled) {
+        final.set(`duplicate:${subscription.id}`, true);
+      }
+      continue;
+    }
+    final.set(subscription.id, subscription.emailReminderEnabled);
+  }
+  return [...final.values()].filter(Boolean).length;
+}
+
+function nextSubscriptionReminderRevision(current: AppSubscription, next: AppSubscription): number {
+  const reminderRelevantChange =
+    current.name !== next.name ||
+    current.amountMicros !== next.amountMicros ||
+    current.currency !== next.currency ||
+    current.recurrence.unit !== next.recurrence.unit ||
+    current.recurrence.count !== next.recurrence.count ||
+    current.recurrence.anchorOn !== next.recurrence.anchorOn ||
+    current.recurrence.anchorMode !== next.recurrence.anchorMode ||
+    current.emailReminderEnabled !== next.emailReminderEnabled ||
+    current.emailReminderDaysBefore !== next.emailReminderDaysBefore ||
+    current.status !== next.status ||
+    current.cancelledAt !== next.cancelledAt ||
+    current.archivedAt !== next.archivedAt;
+  return current.emailReminderRevision + (reminderRelevantChange ? 1 : 0);
 }
 
 function incrementMutationResult(

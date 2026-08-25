@@ -2,7 +2,7 @@
 
 OpenSubLists is a small, self-hostable subscription tracker built as a responsive website on Cloudflare Workers and D1.
 
-It provides recurring billing calculations, combined reporting-currency estimates with original-currency breakdowns, localized category and payment-method presets, common icon and emoji symbols, and portable JSON import/export. Cloudflare Access supplies invite-only email authentication for hosted environments, while a fixed local identity keeps development fully offline from Access.
+It provides recurring billing calculations, combined reporting-currency estimates with original-currency Bar and Donut breakdowns, localized category and payment-method presets directly in the subscription editor, common icon and emoji symbols, portable JSON import/export, and explicit per-subscription renewal email reminders. Cloudflare Access supplies invite-only email authentication for hosted environments, while a fixed local identity keeps development fully offline from Access.
 
 ## Stack
 
@@ -42,8 +42,25 @@ Local requests use the fixed identity `developer@localhost.invalid`. Arbitrary u
 | `pnpm test:integration`  | Run Worker and D1 integration tests                         |
 | `pnpm check`             | Run formatting, lint, type checks, tests, and the build     |
 | `pnpm preview`           | Build and preview the production-shaped bundle locally      |
+| `pnpm docs:dev`          | Start the public documentation site on loopback             |
+| `pnpm docs:build`        | Build and validate the GitHub Pages artifact                |
+| `pnpm docs:preview`      | Build and preview the Pages artifact on loopback            |
 | `pnpm deploy:preview`    | Build and deploy with the preview Cloudflare environment    |
 | `pnpm deploy:production` | Build and deploy with the production Cloudflare environment |
+
+## Public Documentation
+
+The repository includes a VitePress site for the self-hosting guide. It is configured
+for the default GitHub Pages project URL:
+
+```text
+https://hansarnold.github.io/SubList/
+```
+
+The documentation workflow is separate from Worker deployment and uploads only the
+generated static site. This checkout does not assume that Pages has already been
+enabled or published. Run `pnpm docs:dev` and open
+`http://127.0.0.1:5174/SubList/` to review it locally.
 
 ## Self-hosting on Cloudflare
 
@@ -63,6 +80,11 @@ Cloudflare Access uses one-time email PINs, so OpenSubLists does not store passw
 Approved emails remain in the Access policy and must not be committed. Production
 also disables both `workers.dev` and version preview URLs to avoid an unprotected
 alternate entry point.
+
+Renewal email is optional and provider-gated. The tracked configuration keeps it
+disabled and contains no live sender binding. A self-hoster may configure a restricted
+Cloudflare `send_email` binding only in the ignored private configuration; every
+subscription remains independently opted out until its user explicitly enables it.
 
 After provisioning D1 and Access, validate and release with:
 

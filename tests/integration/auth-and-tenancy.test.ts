@@ -169,6 +169,28 @@ describe("Cloudflare Access authentication", () => {
       auditLog.mockRestore();
     }
   });
+
+  it("resolves concurrent verified-email relinks to one identity without a server error", async () => {
+    const email = "concurrent-relink@example.invalid";
+    const originalToken = await accessToken({ subject: "concurrent-original", email });
+    const replacementToken = await accessToken({ subject: "concurrent-replacement", email });
+    const original = await responseData<{ user: { id: string } }>(
+      await remoteRequest("/api/v1/session", originalToken),
+    );
+
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => remoteRequest("/api/v1/session", replacementToken)),
+    );
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    const sessions = await Promise.all(
+      responses.map((response) => responseData<{ user: { id: string } }>(response)),
+    );
+    expect(new Set(sessions.map((session) => session.user.id))).toEqual(
+      new Set([original.user.id]),
+    );
+    expect(await userCount()).toBe(1);
+    expect(await identityCount()).toBe(2);
+  });
 });
 
 describe("HTTP tenant isolation", () => {
@@ -282,7 +304,11 @@ describe("HTTP tenant isolation", () => {
     const preview = await remotePost<{
       digest: string;
       conflicts: { categories: number; paymentMethods: number; subscriptions: number };
-    }>("tenant-b", "/api/v1/imports/preview", { archive });
+    }>("tenant-b", "/api/v1/imports/preview", {
+      archive,
+      conflictStrategy: "skip",
+      importProfile: false,
+    });
     expect(preview.conflicts).toEqual({ categories: 0, paymentMethods: 0, subscriptions: 0 });
     const imported = await remotePost<{
       created: { categories: number; paymentMethods: number; subscriptions: number };

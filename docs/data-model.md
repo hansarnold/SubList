@@ -1,8 +1,11 @@
 # OpenSubLists Data Model
 
-> Status: Implemented baseline with approved refactor target
-> Last updated: 2026-08-23  
-> Target database: Cloudflare D1  
+> Status: Implemented baseline, reporting refactor, and provider-gated renewal email
+>
+> Last updated: 2026-08-24
+>
+> Target database: Cloudflare D1
+>
 > Purpose: Define the target relational model for implementation and maintainer cutover
 
 ## 1. Scope
@@ -17,7 +20,10 @@ This document defines the MVP persistence model for:
 - Tenant isolation and relationship integrity.
 - Materialized next-billing dates.
 
-The target does not persist charge transactions, payment state, pause periods, price history, historical transaction valuation, reminder deliveries, or import history. It persists only the latest available provider snapshots needed for current estimates.
+The implemented model does not persist charge transactions, payment state, pause
+periods, price history, historical transaction valuation, or import history. It does
+persist provider-gated reminder preferences and a delivery outbox, but still does not
+create a charge or payment ledger.
 
 ## 2. Core Decisions
 
@@ -103,13 +109,18 @@ users
   ├──< payment_methods
   └──< subscriptions
           ├── category_id --------> categories.id    (same user)
-          └── payment_method_id --> payment_methods.id (same user)
+          ├── payment_method_id --> payment_methods.id (same user)
+          └──< renewal_email_deliveries
 
 fx_snapshot
   └──< fx_rates
 ```
 
 All tenant-owned primary and foreign keys include `user_id`. FX rows have no `user_id` because one validated snapshot serves every tenant in the deployment.
+
+`renewal_email_deliveries` is a child of
+`subscriptions`. Its composite ownership key preserves tenant isolation, and its
+foreign key cascades only on permanent subscription deletion.
 
 ## 4. Table Definitions
 
@@ -125,6 +136,7 @@ Stores the stable application account and user preferences.
 | display_name       | TEXT    | Yes  | Optional display name                                  |
 | timezone           | TEXT    | No   | IANA time zone, default `UTC`                          |
 | reporting_currency | TEXT    | No   | Currency for combined estimates and new-record default |
+| resource_revision  | INTEGER | No   | Internal monotonic revision for atomic import guards   |
 | created_at         | INTEGER | No   | Unix epoch milliseconds                                |
 | updated_at         | INTEGER | No   | Unix epoch milliseconds                                |
 
@@ -133,6 +145,42 @@ Notes:
 - The MVP has no application-level owner or administrator role because Cloudflare Access manages admission and there is no admin UI.
 - Email normalization is performed by the application. The original verified spelling remains in `primary_email`.
 - An email address maps to one application user in one deployment.
+
+Migration `0006_resource_revisions.sql` adds `resource_revision` with a zero default
+and non-negative check. D1 triggers increment it after every category, payment-method,
+or subscription insert, update, or delete. Import confirmation compares this revision
+and the reviewed user fields inside the same D1 batch that applies the archive. A
+change aborts the whole batch and requires a new preview. The revision is internal and
+is never returned by the API or included in an export.
+
+Provider-gated reminder columns added by migration 0005:
+
+| Column                                     | Type    | Null | Description                                                    |
+| ------------------------------------------ | ------- | ---- | -------------------------------------------------------------- |
+| preferred_locale                           | TEXT    | No   | `en` or `zh-Hans`; migration/default is `en`                   |
+| default_email_reminder_days_before         | INTEGER | No   | Account default in `0..365`; migration/default is `7`          |
+| email_reminder_local_time                  | TEXT    | No   | Whole-hour local `HH:00`; migration/default is `09:00`         |
+| email_reminders_paused                     | INTEGER | No   | User-controlled suppression; migration/default is `0`          |
+| email_reminder_revision                    | INTEGER | No   | System-owned envelope version; migration/default is `0`        |
+| email_reminder_suspension_reason           | TEXT    | Yes  | System safety pause; initially `identity_email_conflict` only  |
+| email_reminder_suspension_email_normalized | TEXT    | Yes  | Internal collision candidate paired with the suspension reason |
+
+`preferred_locale` becomes the persisted account language rather than a copy of an
+arbitrary request header. The UI updates it through the authenticated profile API.
+`email_reminder_local_time` initially matches `^([01]\d|2[0-3]):00$`; arbitrary
+minutes require an interval-based scheduler and are not accepted. D1 checks locale,
+lead-day bounds, whole-hour shape, boolean `0 | 1` values, a non-negative revision, and
+the suspension-reason allow-list. The additive migration backfills every existing row
+with the defaults above and a null suspension reason. D1 cannot read the earlier
+browser-only locale, so the upgraded UI asks an existing user to save the currently
+selected browser locale when it differs from the persisted `en` default; no request
+header silently overwrites it.
+
+`email_reminder_revision` increments only when `primary_email`, time zone, preferred
+locale, account lead time, or local delivery time actually changes. Display name,
+reporting currency, reads, and no-op authentication refreshes do not advance it. User
+pause and system suspension gate delivery separately and do not change the rendered
+envelope revision.
 
 ## 4.2 auth_identities
 
@@ -153,10 +201,24 @@ Primary key: `(provider, subject)`.
 Provisioning rules:
 
 1. Look up `(provider, subject)`.
-2. If found, update `last_seen_at` and refresh the asserted email fields.
+2. If found, normalize the newly asserted verified email and resolve its owner before
+   refreshing identity or user email fields.
 3. If not found, look up `users.email_normalized`.
 4. If exactly one user matches the verified email, attach the new identity to that user. This handles Access removal and re-addition.
 5. Otherwise, create a new `users` row and identity in one D1 batch transaction.
+
+For an existing identity, update `auth_identities.email`,
+`auth_identities.email_normalized`, `users.primary_email`,
+`users.email_normalized`, and the user's `updated_at` in one transaction when the new
+normalized address is unowned or already belongs to that user. Advance
+`email_reminder_revision` only when the verified address actually changes. If the
+address belongs to a different user, including a unique-index race after the owner
+check, fail account resolution with a stable identity-conflict error, retain the
+previous addresses, and set
+`email_reminder_suspension_reason = 'identity_email_conflict'` as a fail-closed
+safeguard. The user-editable pause bit cannot clear this reason. An operator-only
+runbook clears it after resolving the ownership conflict; there is no public API for
+that mutation.
 
 Because email-based OTP proves control of the approved mailbox, verified-email relinking is acceptable for the invite-only MVP. A successful relink emits a structured security-audit event containing only the stable event code, internal user ID, and provider; it does not log the JWT, email, or provider subject.
 
@@ -240,6 +302,29 @@ Recurrence invariants:
 - `calendar_day` retains the original anchor day and clamps it to the last valid day of a shorter month.
 - `end_of_month` always selects the final day of each target month.
 - February 29 yearly schedules clamp to February's final day in non-leap years and return to February 29 in leap years.
+
+Provider-gated reminder columns added by migration 0005:
+
+| Column                     | Type    | Null | Description                                               |
+| -------------------------- | ------- | ---- | --------------------------------------------------------- |
+| email_reminder_enabled     | INTEGER | No   | Explicit boolean opt-in, default `0`                      |
+| email_reminder_days_before | INTEGER | Yes  | Override in `0..365`; `NULL` inherits the account default |
+| email_reminder_revision    | INTEGER | No   | System-owned envelope version, default `0`                |
+
+The enabled field and nullable override are independent. `NULL` never means disabled,
+and the account default never opts in a subscription. Existing rows and legacy imports
+receive `email_reminder_enabled = 0`.
+
+`email_reminder_revision` increments only when a field used by reminder eligibility,
+schedule, or rendered content actually changes: name, amount, currency, recurrence,
+email preference, lifecycle, or archive state. Notes, website, symbol, category,
+payment method, reads, and no-op writes do not advance it.
+
+Subscription writes compare the previously read `updated_at` and
+`email_reminder_revision` in their `UPDATE` predicate. A mismatch returns a conflict
+instead of allowing a stale whole-row mutation to restore a newer reminder choice.
+When deletion detaches a category or payment method, D1 also advances the affected
+subscription's `updated_at` so open editors become stale.
 
 ## 4.6 fx_snapshot
 
@@ -499,9 +584,18 @@ The domain layer owns schedule calculation. Database triggers must not contain c
 
 For a small account, the application may load active subscriptions and reconcile any `next_billing_on` earlier than the user's current local date. Corrections are written back in one batch after the response data is calculated.
 
-### 7.3 Before Future Reminder Processing
+### 7.3 Before Reminder Processing
 
-A scheduled handler must reconcile stale dates before selecting reminders. Reminder delivery must use a separate idempotency table so recalculation cannot produce duplicate messages.
+A scheduled handler must reconcile stale dates before selecting reminders, but it
+must not treat `next_billing_on` as the only candidate. For the user's planning local
+date `D`, it resolves the effective lead days, computes `D + leadDays`, and asks the
+authoritative recurrence rule whether that date is an occurrence. This handles lead
+times that equal or exceed short recurrence intervals.
+
+Only active, unarchived, explicitly enabled subscriptions belonging to an account that
+is not globally paused are eligible. Reminder delivery uses a separate idempotency
+table keyed to the billing occurrence so recalculation, time-zone changes, or lead-time
+edits cannot produce a second logical delivery row for the same occurrence.
 
 ## 8. Main Query Shapes
 
@@ -600,7 +694,7 @@ Read `fx_snapshot` at singleton ID `1` and all `fx_rates` for the same snapshot 
 repository operation. The application validates completeness for the currencies in the
 Dashboard request before producing combined estimates.
 
-## 9. Future Extensions
+## 9. Reminder Delivery and Future Extensions
 
 The following tables can be added without changing the MVP ownership model.
 
@@ -618,21 +712,63 @@ The following tables can be added without changing the MVP ownership model.
 - No overlapping periods for one subscription.
 - Current paused state is derived from periods, not stored as a third subscription lifecycle status.
 
-### 9.3 subscription_reminder_rules
+### 9.3 renewal_email_deliveries — Implemented and Provider-gated
 
-- Composite ownership: `(user_id, subscription_id)`.
-- Reminder lead days, channel, local delivery time, and enabled state.
-- One subscription may support multiple future reminder rules without adding columns to the core subscription record.
+- `id`, plus composite ownership in `user_id` and `subscription_id`.
+- `billing_on`, `effective_days_before`, `intended_send_at`, and exclusive UTC
+  `expires_at` for the start of the next intended local date.
+- `status` constrained to `pending`, `sending`, `retry_wait`, `sent`, `failed`,
+  `unknown`, `cancelled`, or `expired`.
+- Non-negative `attempt_count`, nullable `claimed_at`, 15-minute
+  `lease_expires_at`, and nullable `next_attempt_at`.
+- Nullable `sent_at`, opaque `provider_message_id`, and stable redacted
+  `last_error_code`.
+- `provider_key`, `provider_config_revision`, `application_idempotency_key`,
+  `template_version`, `planned_user_reminder_revision`, and
+  `planned_subscription_reminder_revision`; provider and version fields may be null
+  before the first attempt and become immutable together when that attempt is claimed.
+- `created_at` and `updated_at` audit timestamps.
+- Composite foreign key to subscriptions with `ON DELETE CASCADE`.
+- Unique `(user_id, subscription_id, billing_on)`; lead days are not part of the key.
+- A due-work index over `(status, next_attempt_at, intended_send_at, expires_at)` and
+  the subscription-side partial index for active, unarchived, enabled rows.
+- No copied recipient address, rendered subject/body, or raw provider response.
 
-### 9.4 reminder_deliveries
+The first release supports one logical reminder row per occurrence and therefore uses
+explicit account/subscription fields instead of a generic rules engine. External
+exactly-once delivery is not claimed unless a provider accepts the application
+idempotency key. If multiple channels or multiple configured reminders per occurrence
+are later approved, migrate the preferences to a dedicated rules table rather than
+adding unbounded columns.
 
-- User and subscription ownership.
-- Billing occurrence date.
-- Reminder lead days and channel.
-- Delivery status and provider message ID.
-- A uniqueness constraint preventing duplicate delivery for the same occurrence, lead time, and channel.
+The authoritative transitions are:
 
-### 9.5 import_runs
+- Planner creates `pending`; an atomic claim moves `pending` or a due `retry_wait` row
+  to `sending`, increments the attempt count, sets fresh claim and lease timestamps,
+  and clears `next_attempt_at`.
+- Provider `accepted` moves to `sent`.
+- Provider `definitely_not_accepted_retryable` moves to `retry_wait`, for at most three
+  total attempts before `expires_at`; on attempt three it moves to `failed` with the
+  stable `retry_exhausted` code.
+- Provider `permanent` moves to `failed`.
+- Provider `ambiguous`, including an expired native-provider `sending` lease, moves to
+  `unknown` and is never retried automatically.
+- A `pending` or `retry_wait` row discovered at or after `expires_at` moves to
+  `expired`; a stale `sending` row takes the `unknown` transition instead.
+
+Before the first provider attempt, preference or schedule changes may reschedule or
+cancel a pending row. A global pause gates both `pending` and `retry_wait` until
+unpaused or expired; an unpause resumes only rows whose frozen versions still match.
+Opt-out, cancellation, or archive moves `pending` or safe `retry_wait` work to
+`cancelled`. A cancelled row may reopen only when its attempt count is zero and the
+newly calculated reminder window is still open; after any attempt, re-enabling applies
+to the next occurrence. On first attempt, provider/configuration, template,
+idempotency, and planned row versions freeze. A safe retry requires every version to
+match; a mismatch becomes terminal `cancelled` instead of sending changed content or a
+new destination. `sent`, `failed`, `unknown`, and `expired` rows never reopen for the
+same occurrence.
+
+### 9.4 import_runs
 
 Import runs record the user, source format, schema version, start and finish times, counts, and non-sensitive error summaries. Imported external IDs should live in a dedicated mapping table rather than in generic metadata JSON.
 
@@ -641,6 +777,8 @@ Import runs record the user, source format, schema version, start and finish tim
 - No generic JSON metadata column on subscriptions.
 - No shared account or membership abstraction in the MVP.
 - No actual charge ledger or expense transaction history.
+- No amount, currency, payment-method, or manual-renewal rule that automatically opts a
+  subscription into email.
 - No payment credentials or complete card details.
 - No database trigger for recurrence calculations.
 - No duplicate `user_id` accepted from request payloads.
@@ -659,6 +797,9 @@ The database enforces relational ownership, allowed enum values, non-negative am
 - Paired symbol fields, allow-listed icon tokens, and single-grapheme emoji.
 - Complete FX snapshots and canonical positive rate decimals.
 - Recurrence and month-end behavior.
+- Reminder lead-day bounds, whole-hour local delivery-time shape, persisted locale,
+  lifecycle eligibility, delivery state transitions, one-logical-row-per-occurrence
+  semantics, and explicit handling of ambiguous provider results.
 - Request payload size and note length.
 
 ## 12. Model Decision Checklist
@@ -677,6 +818,18 @@ The implemented model confirms:
 - [x] `next_billing_on` is a server-maintained materialized value.
 - [x] Category names are unique per user after normalization.
 - [x] Categories and payment methods are detached transactionally before deletion.
+
+The reminder model passes these implementation gates:
+
+- [x] Existing and legacy-migrated subscriptions default to email disabled; reviewed
+      version-3 imports preserve only explicit saved choices.
+- [x] Disabled and enabled-with-inherited-lead-time are distinct states.
+- [x] Delivery uniqueness excludes lead days and includes the billing occurrence.
+- [x] Scheduled selection uses recurrence projection for short intervals.
+- [x] Reminder-specific revisions ignore reads, no-op identity refreshes, and pause
+      toggles while covering every envelope-relevant mutation.
+- [x] User pause and system safety suspension are independent and both gate delivery.
+- [x] Recipient and rendered email content are not duplicated into delivery rows.
 
 ## 13. D1 References
 

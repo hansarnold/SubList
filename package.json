@@ -29,10 +29,14 @@
     "build:production": "tsc -b && CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH=wrangler.local.jsonc CLOUDFLARE_ENV=production vite build",
     "build:production:example": "tsc -b && CLOUDFLARE_VITE_WRANGLER_CONFIG_PATH=wrangler.example.jsonc CLOUDFLARE_ENV=production vite build",
     "deploy:dry-run": "pnpm build && wrangler deploy --dry-run",
-    "deploy:dry-run:example:production": "pnpm build:production:example && wrangler deploy --dry-run --env production",
-    "deploy:dry-run:production": "pnpm build:production && wrangler deploy --dry-run --env production",
+    "deploy:dry-run:example:production": "pnpm build:production:example && wrangler deploy --dry-run",
+    "deploy:dry-run:production": "pnpm build:production && wrangler deploy --dry-run",
     "deploy:preview": "pnpm build:preview && wrangler deploy",
     "deploy:production": "pnpm build:production && wrangler deploy",
+    "docs:validate": "node tools/docs/validate-site.mjs self-test",
+    "docs:dev": "pnpm docs:validate && node tools/docs/validate-site.mjs inputs && vitepress site --host 127.0.0.1 --port 5174",
+    "docs:build": "pnpm docs:validate && node tools/docs/validate-site.mjs inputs && vitepress build site && node tools/docs/validate-site.mjs output",
+    "docs:preview": "pnpm docs:build && vitepress preview site --host 127.0.0.1 --port 4174",
     "check": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build"
   },
   "dependencies": {
@@ -46,7 +50,10 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-i18next": "17.0.12",
+    "react-is": "19.2.8",
     "react-router-dom": "7.18.2",
+    "recharts": "3.10.1",
+    "temporal-polyfill": "1.0.4",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -70,6 +77,7 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
     "vite": "8.2.2",
+    "vitepress": "1.6.4",
     "vitest": "4.1.11",
     "wrangler": "4.125.0"
   }

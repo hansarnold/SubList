@@ -1,12 +1,13 @@
 # OpenSubLists Product and Technical Plan
 
-> Status: MVP implemented; reporting, presets, and symbols refactor complete
+> Status: MVP deployed; Phase 4 implemented locally with provider and publication
+> rollout still operator-gated
 >
 > Last updated: 2026-08-24
 >
 > Deployment target: Cloudflare
 >
-> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phase 3 is complete
+> Current phase: Phase 2 remains open for hosted lifecycle verification and isolated preview resources; Phases 3 and 4 are implemented; GitHub Pages publication and production email activation remain operator actions
 
 ## 1. Project Overview
 
@@ -27,7 +28,9 @@ The first deployment will primarily serve the maintainer. A small number of frie
 2. **Data correctness comes first.** Money, billing intervals, month-end dates, and time zones must not depend on ambiguous floating-point or date behavior.
 3. **Private by default.** Authentication is invite-only, and every business query must be scoped to the current user.
 4. **Portable data.** Standard JSON import and export must prevent deployment lock-in.
-5. **Progressive enhancement.** Complete the approved estimated-reporting and organization workflow before adding reminders, actual transaction data, or advanced imports.
+5. **Progressive enhancement.** Complete the approved estimated-reporting and
+   organization workflow before the provider-gated renewal-email phase; actual
+   transaction data and advanced imports remain later work.
 6. **Cloudflare-native without unnecessary coupling.** The runtime targets Workers and D1, while core business rules remain independently testable TypeScript modules.
 
 ## 3. Reference Product and Scope Decisions
@@ -52,9 +55,15 @@ Sign in → Review subscriptions → Add or edit → Review upcoming charges and
 - Exact original-currency breakdowns and visible FX source, date, freshness, and failure state.
 - Reporting-currency and time-zone settings.
 - Localized category and payment-method creation presets.
+- Direct preset and custom resource creation from subscription Create and Edit.
+- Explicit per-subscription renewal email with an account lead-time default and
+  optional subscription override (Phase 4 provider-gated).
 - Allow-listed common icons or one emoji for categories, payment methods, and subscriptions.
+- Amount-based category and payment-method breakdowns with Bar and Donut views.
 - JSON import and export.
 - One responsive website for narrow and wide browser viewports.
+- A self-hosting documentation build for the repository's default GitHub Pages URL;
+  publication remains an operator action.
 
 ### 3.2 Excluded from the MVP
 
@@ -89,7 +98,12 @@ Full-stack Worker
              D1
 ```
 
-The initial deployment uses one Worker. Static assets, the API, and the approved daily ECB rate-refresh `scheduled()` handler remain in one deployment unit. Scheduled work should move to a separate Worker only when permissions, execution time, deployment cadence, or fault isolation create a concrete need.
+The initial deployment uses one Worker. Static assets, the API, the daily ECB
+rate-refresh handler, and the provider-gated renewal-email handler remain in one
+deployment unit. Renewal email uses a separate hourly Cron expression and
+dispatches by `controller.cron` so the jobs fail independently. Scheduled work should
+move to a separate Worker only when permissions, execution time, deployment cadence,
+or fault isolation create a concrete need.
 
 ### 4.2 Components Not Needed Initially
 
@@ -97,7 +111,9 @@ The initial deployment uses one Worker. Static assets, the API, and the approved
 - **KV:** Business data needs relational queries and transactional semantics; D1 is a better fit.
 - **R2:** The MVP does not support image uploads.
 - **Durable Objects:** There is no real-time collaboration or strong single-coordinator requirement.
-- **Queues:** Scheduled work can run directly for a small user base. Add a queue when reliable retries or batch volume justify it.
+- **Queues:** The reminder implementation uses D1 as a durable delivery outbox for the
+  small user base. Add a queue only when measured retry latency, batch volume, or
+  execution limits justify the extra boundary.
 
 ### 4.3 Conditions for Future Service Splitting
 
@@ -183,6 +199,11 @@ External authentication identities are separate from stable application users. E
 
 The migration-ready DDL, indexes, constraints, normalization rules, and extension paths are defined in [Data Model](./data-model.md).
 
+The provider-gated reminder phase plans additive account and subscription preference
+fields plus a `renewal_email_deliveries` table. Existing and imported subscriptions
+remain opted out. The delivery uniqueness key is the user, subscription, and billing
+occurrence so changing lead days cannot send a second email for the same occurrence.
+
 ## 8. Money and Reporting Rules
 
 Persisted subscription amounts use integer micro-units in their original currencies; API amounts and provider rates use canonical decimal strings. Reporting retains exact rational values through normalization, ECB cross-rate conversion, and aggregation, then rounds only at the response boundary. The Dashboard combines complete estimates into the user's reporting currency and retains exact original-currency breakdowns. Every combined value is labeled as an estimate and includes the FX source and rate date.
@@ -195,9 +216,26 @@ Billing dates are local calendar dates. The next occurrence is inclusive of loca
 
 `next_billing_on` is materialized for queries but remains server-derived. The complete specification is maintained in [Billing Rules](./billing-rules.md).
 
+Reminder planning uses the recurrence rule rather than subtracting lead days only
+from `next_billing_on`. For local planning date `D`, it tests whether
+`D + effectiveDaysBefore` is an occurrence. This preserves correct behavior when the
+lead time equals or exceeds a short recurrence interval.
+
 ## 10. Pages and User Flows
 
 The MVP is a responsive website only; there are no native macOS or iOS clients. It includes Dashboard, Subscriptions, and Settings. It uses sidebar navigation at wide browser widths and bottom navigation at narrow widths. The visible English label for the Dashboard route is Overview. Its wide-browser view leads with combined reporting-currency estimates and rate metadata, then preserves the next charge, grouped renewal agenda, original-currency breakdown, and category summary. Category onboarding offers a reviewed preset bundle; category and payment settings offer localized templates; all three resource editors share an accessible common-icon and emoji picker. The wide-browser Subscriptions route retains a responsive card grid with an optional compact list view, search, sorting, and tenant-scoped filters.
+
+The implemented Phase 4 follow-up makes those same category and payment-method
+templates available directly from subscription Create and Edit. It also adds
+mathematically consistent Bar and Donut views for estimated category and
+payment-method composition and builds the canonical self-hosting guide for GitHub
+Pages without a custom documentation domain. Publication remains an operator action.
+
+The provider-gated email follow-up adds an explicit reminder toggle to Subscription
+Create and Edit, an inherited-or-overridden lead time, a calculated reminder preview,
+and account settings for the default lead time, local delivery time, persisted email
+locale, and a global pause. It never infers opt-in from amount, currency, payment
+method, or a manual-renewal label.
 
 Responsive behavior, lifecycle actions, accessibility, localization, empty states, and acceptance flows are defined in [MVP UI Flow](./ui-flow.md).
 
@@ -274,20 +312,37 @@ Completion criterion: The Dashboard provides complete reporting-currency estimat
 
 The detailed implementation order and cutover gates are defined in [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md).
 
-### Phase 4: Friend Preview
+### Phase 4: Self-service Workflow and Friend Preview — Implemented Locally
 
-- [ ] Add first-run setup guidance.
+- [x] Add first-run setup guidance.
+- [x] Expose existing, preset-created, and custom categories directly in subscription Create and Edit.
+- [x] Expose existing, preset-created, and custom payment methods directly in subscription Create and Edit.
+- [x] Correct the category breakdown metric and add accessible Bar and Donut views for category and payment-method estimates.
+- [ ] Publish the self-hosting guide from this repository through the default GitHub Pages project URL without a custom domain.
+- [x] Provider-gated: add explicit per-subscription renewal email, D1 delivery
+      idempotency and retries, persisted locale, an hourly Cron, and the Cloudflare email
+      adapter. Production sender and recipient verification remain disabled operator
+      configuration, not repository state.
 - [x] Improve empty states, error messages, and mobile behavior.
-- Obtain a redacted native SubList JSON sample.
+- [ ] Obtain a redacted native SubList JSON sample.
 - [x] Add versioned OpenSubLists JSON import.
 - [ ] Add the native SubList migration adapter after receiving a redacted fixture.
-- Invite a small group and collect feedback.
+- [ ] Invite a small group and collect feedback.
 
-Completion criterion: A new user can record their first subscription without developer guidance.
+Completion criterion: A new user can record a first subscription without developer
+guidance, and an operator can follow the public documentation from a clean clone to a
+verified private deployment.
+
+The provider-gated reminder subphase is complete when an opted-in subscription creates
+one logical delivery row for a projected occurrence, provider results follow the
+documented conservative retry/unknown policy, and local or CI runs cannot contact a
+real mailbox.
+
+The detailed delivery sequence and acceptance gates are defined in
+[Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
 
 ### Phase 5: Demand-driven Enhancements
 
-- Email reminders.
 - Price history and pause periods.
 - Actual transaction tracking only if the product stops being an estimate-only ledger.
 - An iCalendar subscription feed.
@@ -305,6 +360,9 @@ Completion criterion: A new user can record their first subscription without dev
 - Exact multi-currency conversion into one reporting currency without losing original-currency totals.
 - Missing and stale FX behavior, one-snapshot consistency, and provider-failure fallback.
 - Preset localization, symbol validation, and accessible icon/emoji selection.
+- Reminder default versus override, short recurrences, local delivery dates, DST,
+  lifecycle suppression, identity-email collisions, duplicate Cron runs, explicit
+  provider outcomes, retries, import-time provider absence, and safe redacted logs.
 - Cross-user access attempts on every resource endpoint.
 - Repeated JSON imports and rollback after failed imports.
 
@@ -325,7 +383,10 @@ Completion criterion: A new user can record their first subscription without dev
 The following do not block the first hosted deployment:
 
 1. A redacted native SubList JSON export is still required before its adapter can be finalized.
-2. The first reminder channel remains deferred until reminders enter the approved scope.
+2. Whether a future arbitrary-recipient adapter should use Cloudflare Email Sending or
+   another HTTP provider after the initial verified-destination rollout.
+3. Whether the deferred 12-month projection should reuse Recharts or a smaller
+   purpose-built visualization after real usage establishes its value.
 
 ## 18. Current Decisions
 
@@ -347,13 +408,32 @@ The following do not block the first hosted deployment:
 - The Dashboard combines complete estimates in the user's reporting currency with ECB daily reference rates and always retains original-currency totals.
 - Combined values are estimates only; the product has no payment or transaction ledger.
 - Category and payment-method presets are localized creation templates copied into ordinary tenant rows.
+- Subscription Create and Edit expose those templates through explicit
+  reusable-resource creation; preset keys never become subscription data.
 - Categories, payment methods, and subscriptions may store an allow-listed common icon token or one emoji.
 - The initial FX refresh runs as a Cron Trigger on the existing full-stack Worker and atomically replaces one last known-good snapshot in D1.
+- Renewal email is an explicit per-subscription opt-in. The account default never
+  enables it, and amount, currency, payment method, or manual-renewal heuristics do not
+  affect eligibility.
+- The reminder scheduler uses an independent hourly Cron, authoritative
+  recurrence projection, the current verified primary email, original-currency
+  values, and a D1 delivery ledger unique per billing occurrence.
+- The initial production email adapter targets Cloudflare's native `send_email`
+  binding and verified destination addresses. Deployments without a configured sender
+  advertise the capability as unavailable. Ambiguous native-provider results become
+  visible terminal `unknown` states rather than automatic retries, and Queue adoption
+  remains evidence-driven.
 - Money is stored as integer micro-units.
 - Subscription lifecycle state is active or cancelled; archiving is independent and is the default removal action.
 - Pause periods and price history are deferred to dedicated tables.
 - The API base path is `/api/v1`.
 - The Dashboard API returns projected occurrence records, not subscription rows, so short recurrence intervals are counted correctly.
+- The Phase 4 Dashboard charts visualize reporting-currency estimates
+  only when conversion is complete and always retain an accessible
+  original-currency disclosure.
+- The Phase 4 public self-hosting guide is built from the same GitHub repository for
+  the default GitHub Pages project URL with no `CNAME` or custom domain. Publication
+  requires the repository owner to enable GitHub Actions as the Pages source.
 - The personal MVP caps each account at 50 subscriptions and dashboard occurrence expansion at a 30-day window.
 - The product is one responsive website; native desktop and mobile clients are outside the MVP.
 - Initial UI locales are English and Simplified Chinese.
@@ -367,5 +447,7 @@ The following do not block the first hosted deployment:
 - [Cloudflare Access Application Token](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/)
 - [Cloudflare Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - [Cloudflare Workers Pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+- [Cloudflare Workers email API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/)
+- [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
 - [ECB Data API](https://data.ecb.europa.eu/help/api/data)
 - [ECB euro foreign exchange reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html)

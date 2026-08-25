@@ -1,6 +1,7 @@
 # OpenSubLists Environments and Deployment
 
-> Status: Implemented operations baseline; legacy cutover procedure retained
+> Status: Implemented operations baseline and provider-gated renewal-email runtime;
+> production email activation remains an operator action
 > Last updated: 2026-08-24
 > Deployment platform: Cloudflare
 
@@ -45,7 +46,25 @@ Required bindings and variables:
 | `TEAM_DOMAIN`   | Plain variable | Cloudflare Access team domain       |
 | `POLICY_AUD`    | Plain variable | Access application audience         |
 
-Future email provider keys and import-signing secrets, if any, use encrypted Worker secrets rather than plain variables.
+Optional reminder configuration:
+
+| Name                                      | Kind                 | Purpose                                        |
+| ----------------------------------------- | -------------------- | ---------------------------------------------- |
+| `EMAIL`                                   | `send_email` binding | Native production transport                    |
+| `EMAIL_REMINDER_MODE`                     | Plain variable       | `disabled`, `fake`, or production `cloudflare` |
+| `EMAIL_REMINDER_FROM`                     | Plain variable       | Verified production sender address             |
+| `EMAIL_REMINDER_PROVIDER_CONFIG_REVISION` | Plain variable       | Positive operator-controlled config version    |
+
+Provider-gated email configuration optionally adds an `EMAIL` `send_email` binding,
+sets `EMAIL_REMINDER_MODE=cloudflare`, and supplies the private
+`EMAIL_REMINDER_FROM` deployment value for the native Cloudflare adapter. It also uses
+the operator-controlled `EMAIL_REMINDER_PROVIDER_CONFIG_REVISION` value, which must
+change whenever the binding, sender identity, or recipient policy changes; safe
+retries compare the frozen revision before dispatch. The tracked example contains only
+obvious placeholder shapes. Actual sender domains, revision values, and recipient
+restrictions belong in ignored `wrangler.local.jsonc`. A future external HTTP provider
+uses an encrypted Worker secret rather than a plain variable. The message-template
+version is a source-code constant rather than deployment configuration.
 
 ## 3. Local Authentication
 
@@ -99,6 +118,28 @@ only to an email address that matches the Access allowlist. To invite or remove 
 friend, update the Access policy; no application database or password reset is
 required.
 
+After renewal email is enabled, Access removal alone does not stop scheduled messages
+because the application retains the last verified primary email. The operator must
+also pause that user's reminders or remove/suppress the destination at the email
+provider before removing access.
+
+A verified-email ownership collision sets a system-owned reminder suspension and
+fails identity resolution. User settings cannot clear it. The implemented operator
+command rechecks uniqueness and clears only the matching suspension by internal user ID
+after the underlying Access/application identity conflict is resolved. It also pauses
+all reminders, increments the account reminder revision, and cancels stale unattempted
+deliveries. The user must then sign in so the Worker refreshes the verified primary
+email and explicitly unpause reminders. Production use requires a D1 recovery point and
+an explicit confirmation. Run it only from a trusted operator shell:
+
+```sh
+node tools/reminders/clear-identity-suspension.mjs \
+  --user-id 00000000-0000-0000-0000-000000000000 \
+  --confirm-user-id 00000000-0000-0000-0000-000000000000 \
+  --database DB --config wrangler.local.jsonc \
+  --remote --env production
+```
+
 `TEAM_DOMAIN` is the bare hostname returned by Cloudflare, without `https://`. The
 Worker constructs the issuer URL and JWKS URL from that hostname. `POLICY_AUD` is the
 exact audience returned by the hostname's Access application.
@@ -113,7 +154,9 @@ The Worker still validates `Cf-Access-Jwt-Assertion` even though Access is place
 - API and static application routes share the protected origin.
 - Health endpoints must not expose database, identity, or environment details.
 
-A public static marketing site, if ever added, should use a separate hostname or deployment rather than exceptions inside the protected application.
+The public self-hosting documentation site is implemented for the repository's default
+GitHub Pages project URL and a separate deployment. It never requires exceptions
+inside the protected application or publishes application configuration.
 
 ## 6. Database Lifecycle
 
@@ -134,6 +177,8 @@ migrations/
   0002_resource_limits.sql
   0003_reduce_subscription_limit.sql
   0004_reporting_presets_symbols.sql
+  0005_renewal_email_reminders.sql
+  0006_resource_revisions.sql
 ```
 
 Migration workflow:
@@ -187,6 +232,7 @@ Every pull request must run:
 7. D1 schema and repository integration tests.
 8. Tenant-isolation API tests.
 9. Production build.
+10. Public documentation-site build, inclusion, base-path, and artifact validation.
 
 Critical end-to-end browser tests may run on merge or against preview if their runtime cost is higher.
 
@@ -215,6 +261,24 @@ Automatic production deployment is deferred until the release process is stable.
 An initial operator release may deploy directly to an already protected
 production hostname after all local gates pass. Before subsequent feature releases,
 provision the isolated preview environment and resume the normal preview-first flow.
+
+### 9.1 GitHub Pages Documentation Deployment — Implemented Locally, Publication Pending
+
+The public documentation site has a dedicated GitHub Actions workflow. It builds
+VitePress from the repository's `site/` directory, uploads only the generated static
+output, and deploys through the `github-pages` environment after a push to `main` or a
+manual dispatch. Pull requests build and validate the site through normal CI but never
+deploy it.
+
+This workflow is operationally independent from preview and production Workers. It has
+no Cloudflare credentials, cannot migrate D1, and cannot change the
+protected application. The detailed implementation and artifact-security gates are
+defined in
+[Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
+
+The repository owner must still select GitHub Actions as the Pages publishing source
+and complete the first successful workflow run. Local implementation must not be
+recorded as a live publication until the default project URL has been verified.
 
 ## 10. Release Smoke Tests
 
@@ -314,7 +378,24 @@ Production configures `15 18 * * *`; Cloudflare Cron expressions run in UTC.
 - Make provider/date refresh idempotent.
 - Test the scheduled handler through the Cloudflare Vite local scheduled route.
 - Split background work only if execution or permission boundaries justify it.
-- Any later reminder job must convert user-local intent into a UTC execution window.
+- `5 * * * *` runs renewal-email planning and delivery. Dispatch by
+  the exact `controller.cron` value so the hourly trigger does not refresh ECB and the
+  daily trigger does not scan reminder deliveries.
+- Convert each user's configured local delivery time into one UTC intent and use the
+  recurrence rule to test the target billing occurrence; do not use
+  `next_billing_on - leadDays` as the only selector.
+- Use D1 as the bounded durable delivery outbox and retry ledger. Keep Cloudflare
+  Queues deferred until measured volume, retry latency, or execution limits justify it.
+- Treat D1 uniqueness as one logical delivery row, not exactly-once physical email.
+  The native binding has no documented idempotency input, so ambiguous results and
+  expired `sending` leases become terminal `unknown`; only a result that proves
+  non-acceptance is retried.
+- Local and CI use an injected fake email sender. Exercise the hourly path through the
+  Cloudflare Vite scheduled route with explicit `cron` and `time` parameters.
+- Preview either uses the fake sender or a strict operator-only destination. Production
+  rollout verifies one operator destination before any friend reminder is enabled.
+- When no sender is configured, expose `capabilities.emailReminders = false`, perform
+  no delivery call, and leave the rest of the application operational.
 
 ## 16. Production Readiness Checklist
 
@@ -338,6 +419,19 @@ This is an operator checklist rather than a record of any specific deployment.
 - [ ] Reporting estimates verified against an independent fixture.
 - [ ] Preview smoke tests passed.
 
+Phase 4 provider-gated reminder readiness:
+
+- [ ] Reminder migration applied with existing subscriptions disabled.
+- [ ] Native email binding or reviewed external provider configured only in the target
+      environment.
+- [ ] Sender domain and initial operator destination verified.
+- [ ] Hourly Cron deployed and independently dispatched from the daily FX Cron.
+- [ ] Fake-sender local tests and operator-only preview tests passed.
+- [ ] A no-send scheduled scan completed before the first operator reminder was enabled.
+- [ ] One operator reminder delivered, retry state inspected, and logs verified to
+      contain no recipient or message content.
+- [ ] Disabling the Cron or provider capability was rehearsed as the reminder rollback.
+
 ### 16.1 Operator Release Records
 
 An operator may keep Worker version IDs, D1 recovery bookmarks, smoke-test results,
@@ -354,3 +448,7 @@ approved identities, or user data to this public repository.
 - [Cloudflare Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
 - [ECB Data API](https://data.ecb.europa.eu/help/api/data)
 - [Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+- [Cloudflare Workers email API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/)
+- [Cloudflare email send bindings](https://developers.cloudflare.com/email-service/configuration/send-bindings/)
+- [Cloudflare Email Service pricing](https://developers.cloudflare.com/email-service/platform/pricing/)
+- [Cloudflare Email Routing subdomains](https://developers.cloudflare.com/email-service/configuration/subdomains/)

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "rasters": [
+    {
+      "source": "docs/assets/open-sublists-dashboard-prototype-web.png",
+      "outputBasename": "open-sublists-dashboard-prototype-web",
+      "sha256": "1ccb02be67f964e66d6d5de647b2a2991828693b1f55d91b4231a6757e5f630d"
+    }
+  ]
+}

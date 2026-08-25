@@ -4,5 +4,7 @@ node_modules
 coverage
 playwright-report
 test-results
+site/.vitepress/cache
+site/.vitepress/dist
 worker-configuration.d.ts
 docs/assets/*.png

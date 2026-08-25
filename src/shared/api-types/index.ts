@@ -31,6 +31,11 @@ export type User = {
   timezone: string;
   reportingCurrency: string;
   onboardingCompletedAt: string | null;
+  preferredLocale: "en" | "zh-Hans";
+  defaultEmailReminderDaysBefore: number;
+  emailReminderLocalTime: string;
+  emailRemindersPaused: boolean;
+  emailReminderSystemSuspended: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -85,8 +90,20 @@ export type Subscription = {
   paymentMethodId: string | null;
   websiteUrl: string | null;
   notes: string | null;
+  emailReminderEnabled: boolean;
+  emailReminderDaysBefore: number | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type RenewalEmailDeliverySummary = {
+  state: "none" | "scheduled" | "paused" | "retrying" | "sent" | "failed" | "unknown" | "expired";
+  occurrenceOn: string | null;
+  lastAttemptAt: string | null;
+};
+
+export type SubscriptionDetail = Subscription & {
+  emailReminderDelivery: RenewalEmailDeliverySummary;
 };
 
 export type UpcomingCharge = {
@@ -129,6 +146,11 @@ export type PaymentMethodBreakdown = {
   paymentMethodKind: PaymentMethodKind | null;
   paymentMethodSymbol: ResourceSymbol;
   subscriptionCount: number;
+  totalsByCurrency: Array<{
+    currency: string;
+    monthlyEstimate: string;
+    annualizedEstimate: string;
+  }>;
   reportingMonthlyAverage: string | null;
   reportingAnnualized: string | null;
 };
@@ -166,6 +188,30 @@ export type Dashboard = {
   paymentMethodBreakdown: PaymentMethodBreakdown[];
 };
 
+export type OpenSubListsArchiveV3 = {
+  format: "opensublists";
+  schemaVersion: 3;
+  archiveId: string;
+  exportedAt: string;
+  generator: {
+    name: "OpenSubLists";
+    version: string;
+  };
+  profile: {
+    displayName: string | null;
+    timezone: string;
+    reportingCurrency: string;
+    preferredLocale: "en" | "zh-Hans";
+    defaultEmailReminderDaysBefore: number;
+    emailReminderLocalTime: string;
+    emailRemindersPaused: boolean;
+  };
+  categories: Category[];
+  paymentMethods: PaymentMethod[];
+  subscriptions: Array<Omit<Subscription, "nextBillingOn">>;
+};
+
+/** Offline migration input only. The HTTP API accepts schema version 3 exclusively. */
 export type OpenSubListsArchiveV2 = {
   format: "opensublists";
   schemaVersion: 2;
@@ -182,7 +228,15 @@ export type OpenSubListsArchiveV2 = {
   };
   categories: Category[];
   paymentMethods: PaymentMethod[];
-  subscriptions: Array<Omit<Subscription, "nextBillingOn">>;
+  subscriptions: Array<
+    Omit<Subscription, "nextBillingOn" | "emailReminderEnabled" | "emailReminderDaysBefore">
+  >;
+};
+
+export type ReminderImportImpact = {
+  enabledPreferencesAfterApply: number;
+  senderCapabilityAvailable: boolean;
+  willForceGlobalPause: boolean;
 };
 
 export type ImportWarning = {
@@ -193,7 +247,7 @@ export type ImportWarning = {
 
 export type ImportPreview = {
   digest: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
   counts: {
     categories: number;
     paymentMethods: number;
@@ -205,6 +259,7 @@ export type ImportPreview = {
     subscriptions: number;
   };
   warnings: ImportWarning[];
+  reminderImpact: ReminderImportImpact;
 };
 
 export type ImportResult = {
@@ -212,9 +267,13 @@ export type ImportResult = {
   updated: { categories: number; paymentMethods: number; subscriptions: number };
   skipped: { categories: number; paymentMethods: number; subscriptions: number };
   warnings: ImportWarning[];
+  reminderImpact: ReminderImportImpact;
 };
 
 export type Session = {
   user: User;
   environment: "local" | "preview" | "production";
+  capabilities: {
+    emailReminders: boolean;
+  };
 };

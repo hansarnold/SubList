@@ -2,6 +2,7 @@ import type {
   AppCategory,
   AppDashboardSubscription,
   AppPaymentMethod,
+  AppRenewalEmailDelivery,
   AppSubscription,
   AppUser,
 } from "../../application/models";
@@ -28,6 +29,14 @@ export type UserRow = {
   onboarding_completed_at: number | null;
   created_at: number;
   updated_at: number;
+  preferred_locale: "en" | "zh-Hans";
+  default_email_reminder_days_before: number;
+  email_reminder_local_time: string;
+  email_reminders_paused: number;
+  email_reminder_revision: number;
+  email_reminder_suspension_reason: "identity_email_conflict" | null;
+  email_reminder_suspension_email_normalized: string | null;
+  resource_revision: number;
 };
 
 export type CategoryRow = {
@@ -76,6 +85,35 @@ export type SubscriptionRow = {
   symbol_value: string | null;
   website_url: string | null;
   notes: string | null;
+  email_reminder_enabled: number;
+  email_reminder_days_before: number | null;
+  email_reminder_revision: number;
+  created_at: number;
+  updated_at: number;
+};
+
+export type RenewalEmailDeliveryRow = {
+  id: string;
+  user_id: string;
+  subscription_id: string;
+  billing_on: string;
+  effective_days_before: number;
+  intended_send_at: number;
+  expires_at: number;
+  status: AppRenewalEmailDelivery["status"];
+  attempt_count: number;
+  claimed_at: number | null;
+  lease_expires_at: number | null;
+  next_attempt_at: number | null;
+  sent_at: number | null;
+  provider_message_id: string | null;
+  last_error_code: string | null;
+  provider_key: string | null;
+  provider_config_revision: number | null;
+  application_idempotency_key: string | null;
+  template_version: number | null;
+  planned_user_reminder_revision: number;
+  planned_subscription_reminder_revision: number;
   created_at: number;
   updated_at: number;
 };
@@ -110,6 +148,13 @@ export function mapUserRow(row: UserRow): AppUser {
     timezone: row.timezone,
     reportingCurrency: row.reporting_currency,
     onboardingCompletedAt: row.onboarding_completed_at,
+    preferredLocale: row.preferred_locale,
+    defaultEmailReminderDaysBefore: row.default_email_reminder_days_before,
+    emailReminderLocalTime: row.email_reminder_local_time,
+    emailRemindersPaused: row.email_reminders_paused === 1,
+    emailReminderRevision: row.email_reminder_revision,
+    emailReminderSuspensionReason: row.email_reminder_suspension_reason,
+    emailReminderSuspensionEmailNormalized: row.email_reminder_suspension_email_normalized,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -162,6 +207,37 @@ export function mapSubscriptionRow(row: SubscriptionRow): AppSubscription {
     symbol: mapStoredResourceSymbol(row.symbol_type, row.symbol_value),
     websiteUrl: row.website_url,
     notes: row.notes,
+    emailReminderEnabled: row.email_reminder_enabled === 1,
+    emailReminderDaysBefore: row.email_reminder_days_before,
+    emailReminderRevision: row.email_reminder_revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapRenewalEmailDeliveryRow(row: RenewalEmailDeliveryRow): AppRenewalEmailDelivery {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    subscriptionId: row.subscription_id,
+    billingOn: row.billing_on,
+    effectiveDaysBefore: row.effective_days_before,
+    intendedSendAt: row.intended_send_at,
+    expiresAt: row.expires_at,
+    status: row.status,
+    attemptCount: row.attempt_count,
+    claimedAt: row.claimed_at,
+    leaseExpiresAt: row.lease_expires_at,
+    nextAttemptAt: row.next_attempt_at,
+    sentAt: row.sent_at,
+    providerMessageId: row.provider_message_id,
+    lastErrorCode: row.last_error_code,
+    providerKey: row.provider_key,
+    providerConfigRevision: row.provider_config_revision,
+    applicationIdempotencyKey: row.application_idempotency_key,
+    templateVersion: row.template_version,
+    plannedUserReminderRevision: row.planned_user_reminder_revision,
+    plannedSubscriptionReminderRevision: row.planned_subscription_reminder_revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

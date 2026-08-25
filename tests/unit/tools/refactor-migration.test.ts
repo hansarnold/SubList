@@ -7,13 +7,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { OpenSubListsService } from "../../../src/application/service";
 import type { OpenSubListsRepository } from "../../../src/application/ports";
-import { archiveV2Schema } from "../../../src/shared/api-types/schemas";
+import type { OpenSubListsArchiveV3 } from "../../../src/shared/api-types";
+import { archiveV2Schema, archiveV3Schema } from "../../../src/shared/api-types/schemas";
+// @ts-expect-error The operator tool is intentionally plain JavaScript outside the app TS build.
+import * as untypedReminderMigration from "../../../tools/reminder-migration/index.js";
 // @ts-expect-error The operator tool is intentionally plain JavaScript outside the app TS build.
 import * as untypedMigrationModule from "../../../tools/refactor-migration/index.js";
 
 type MigrationError = Error & {
   code: string;
   issues: ReadonlyArray<{ path: string; message: string }>;
+};
+
+const { transformArchiveV2 } = untypedReminderMigration as unknown as {
+  transformArchiveV2: (sourceText: string) => OpenSubListsArchiveV3;
 };
 
 type ResourceSymbol = { type: "icon" | "emoji"; value: string } | null;
@@ -165,27 +172,33 @@ describe("the one-time archive v1 to v2 transformer", () => {
     expect(result.reviewCsv).toContain(`Visa [${PAYMENT_METHOD_ID}]`);
   });
 
-  it("emits v2 accepted by both the archive schema and runtime canonicalization", async () => {
+  it("emits canonical v2 that upgrades offline to the current runtime archive", async () => {
     const result = transformArchiveV1(sourceText());
+    const upgraded = transformArchiveV2(JSON.stringify(result.archive));
     const runtime = new OpenSubListsService({
       getImportState: () =>
         Promise.resolve({
+          resourceRevision: 0,
           categoryIds: new Set<string>(),
           paymentMethodIds: new Set<string>(),
           subscriptionIds: new Set<string>(),
           categoryNameKeysById: new Map<string, string>(),
+          emailReminderEnabledBySubscriptionId: new Map<string, boolean>(),
         }),
     } as unknown as OpenSubListsRepository);
 
     expect(archiveV2Schema.safeParse(result.archive).success).toBe(true);
+    expect(archiveV3Schema.safeParse(upgraded).success).toBe(true);
     await expect(
-      runtime.previewImport(
-        "migration-rehearsal-user",
-        result.archive as unknown as Record<string, unknown>,
-      ),
+      runtime.previewImport("migration-rehearsal-user", {
+        archive: upgraded,
+        conflictStrategy: "skip",
+        importProfile: false,
+      }),
     ).resolves.toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       counts: { categories: 1, paymentMethods: 1, subscriptions: 3 },
+      reminderImpact: { enabledPreferencesAfterApply: 0 },
     });
   });
 

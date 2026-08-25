@@ -5,6 +5,7 @@ import type {
   SubscriptionStatus,
 } from "../shared/api-types";
 import type { ResourceSymbol } from "../domain";
+import type { ReminderLocale } from "../domain";
 
 export type AuthenticatedIdentity = {
   provider: "cloudflare_access" | "local_development";
@@ -19,6 +20,14 @@ export type AppUser = {
   timezone: string;
   reportingCurrency: string;
   onboardingCompletedAt: number | null;
+  preferredLocale: ReminderLocale;
+  defaultEmailReminderDaysBefore: number;
+  emailReminderLocalTime: string;
+  emailRemindersPaused: boolean;
+  emailReminderRevision: number;
+  emailReminderSuspensionReason: "identity_email_conflict" | null;
+  /** Internal-only collision candidate. Never expose through API, archives, or logs. */
+  emailReminderSuspensionEmailNormalized: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -65,8 +74,59 @@ export type AppSubscription = {
   symbol: ResourceSymbol;
   websiteUrl: string | null;
   notes: string | null;
+  emailReminderEnabled: boolean;
+  emailReminderDaysBefore: number | null;
+  emailReminderRevision: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export const RENEWAL_EMAIL_DELIVERY_STATUSES = [
+  "pending",
+  "sending",
+  "retry_wait",
+  "sent",
+  "failed",
+  "unknown",
+  "cancelled",
+  "expired",
+] as const;
+
+export type RenewalEmailDeliveryStatus = (typeof RENEWAL_EMAIL_DELIVERY_STATUSES)[number];
+
+export type AppRenewalEmailDelivery = {
+  id: string;
+  userId: string;
+  subscriptionId: string;
+  billingOn: string;
+  effectiveDaysBefore: number;
+  intendedSendAt: number;
+  expiresAt: number;
+  status: RenewalEmailDeliveryStatus;
+  attemptCount: number;
+  claimedAt: number | null;
+  leaseExpiresAt: number | null;
+  nextAttemptAt: number | null;
+  sentAt: number | null;
+  providerMessageId: string | null;
+  lastErrorCode: string | null;
+  providerKey: string | null;
+  providerConfigRevision: number | null;
+  applicationIdempotencyKey: string | null;
+  templateVersion: number | null;
+  plannedUserReminderRevision: number;
+  plannedSubscriptionReminderRevision: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ReminderPlanningCandidate = {
+  user: AppUser;
+  subscription: AppSubscription;
+};
+
+export type ReminderDeliveryCandidate = ReminderPlanningCandidate & {
+  delivery: AppRenewalEmailDelivery;
 };
 
 export type AppDashboardSubscription = AppSubscription & {
@@ -91,8 +151,10 @@ export type SubscriptionListFilter = {
 };
 
 export type ExistingImportState = {
+  resourceRevision: number;
   categoryIds: Set<string>;
   paymentMethodIds: Set<string>;
   subscriptionIds: Set<string>;
   categoryNameKeysById: Map<string, string>;
+  emailReminderEnabledBySubscriptionId: Map<string, boolean>;
 };

@@ -1,6 +1,7 @@
 # OpenSubLists Implementation Readiness Checklist
 
-> Status: First hosted deployment online; reporting, presets, and symbols refactor complete
+> Status: First hosted deployment online; Phase 4 is implemented locally, while
+> GitHub Pages publication and production email activation remain operator-gated
 > Last updated: 2026-08-24
 
 This checklist records both the planning evidence and the implementation gates for the MVP.
@@ -179,3 +180,40 @@ Provision isolated preview resources before enabling regular preview releases, a
 - [x] Preserve raw production export, D1 backup, transformed export, hashes, and review report.
 - [x] Rehearse and verify the cutover before changing the production D1 binding.
 - [x] Keep the previous Worker/database pair available until explicit operator acceptance.
+
+## 14. Phase 4 Follow-up Gate — Implemented Locally
+
+- [x] Identify why empty category and payment-method selectors show only `None`.
+- [x] Define one shared preset/custom creation flow for subscription Create and Edit.
+- [x] Preserve the ordinary tenant-owned resource model without a D1 migration.
+- [x] Define category and payment-method Bar and Donut metrics, disclosure, and sparse states.
+- [x] Define a no-custom-domain GitHub Pages architecture for the public self-hosting guide.
+- [x] Define explicit per-subscription email opt-in with account default and nullable
+      override; reject amount and manual-renewal heuristics.
+- [x] Define authoritative recurrence-based target selection for lead times that equal
+      or exceed short billing intervals.
+- [x] Define the D1 delivery ledger, one-logical-row-per-occurrence key, claim/retry
+      model, terminal ambiguous-result policy, persisted locale, and global pause.
+- [x] Define the exact delivery states, provider outcomes, claim and same-day expiry,
+      re-enable behavior, and provider-neutral Subscription Detail summary.
+- [x] Define existing-user defaults, collision-aware primary-email refresh, and
+      reminder-import behavior when no sender is available.
+- [x] Separate user pause from system suspension and replace generic timestamps with
+      reminder-specific retry revisions.
+- [x] Define the local-wall-time conversion primitive, pre-due derived status, retry
+      claim transition, and unavailable-sender unpause gate.
+- [x] Confirm the native Cloudflare verified-destination path for the initial free-plan
+      owner/friend deployment and keep arbitrary-recipient delivery provider-gated.
+- [x] Implement and test the shared resource association fields.
+- [x] Correct the existing category bar metric and implement the approved chart views.
+- [x] Build and validate the VitePress documentation site and Pages workflow locally.
+- [ ] Enable GitHub Actions as the Pages source, publish, and verify the default project URL.
+- [x] Add reminder migrations, API/archive fields, UI, fake sender, D1 outbox, and
+      hourly scheduled service.
+- [ ] Configure a private sender binding, verify an operator destination, run the
+      no-send scan, and inspect one operator delivery before enabling friend reminders.
+- [x] Verify reminder localization, lifecycle suppression, duplicate Cron runs,
+      retries, privacy-safe logs, and rollback by disabling the capability.
+
+Evidence:
+[Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md)

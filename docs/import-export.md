@@ -1,9 +1,9 @@
 # OpenSubLists Import and Export Format
 
-> Status: Implemented archive schema version 2
+> Status: Implemented archive schema version 3
 > Last updated: 2026-08-24
 > Media type: `application/json`  
-> Current target schema version: `2`
+> Current target schema version: `3`
 
 ## 1. Goals
 
@@ -29,7 +29,7 @@ The archive format must:
 ```json
 {
   "format": "opensublists",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "archiveId": "550e8400-e29b-41d4-a716-446655440000",
   "exportedAt": "2026-08-23T08:15:30.123Z",
   "generator": {
@@ -39,7 +39,11 @@ The archive format must:
   "profile": {
     "displayName": "Example User",
     "timezone": "Asia/Shanghai",
-    "reportingCurrency": "CNY"
+    "reportingCurrency": "CNY",
+    "preferredLocale": "zh-Hans",
+    "defaultEmailReminderDaysBefore": 7,
+    "emailReminderLocalTime": "09:00",
+    "emailRemindersPaused": false
   },
   "categories": [],
   "paymentMethods": [],
@@ -47,7 +51,7 @@ The archive format must:
 }
 ```
 
-Required top-level properties are fixed for schema version 2. Unknown top-level properties produce warnings but do not fail import unless they conflict with a defined field.
+Required top-level properties are fixed for schema version 3. Unknown top-level properties produce warnings but do not fail import unless they conflict with a defined field.
 
 ## 4. Exported Profile
 
@@ -56,6 +60,10 @@ type ExportProfile = {
   displayName: string | null;
   timezone: string;
   reportingCurrency: string;
+  preferredLocale: "en" | "zh-Hans";
+  defaultEmailReminderDaysBefore: number;
+  emailReminderLocalTime: string;
+  emailRemindersPaused: boolean;
 };
 ```
 
@@ -66,6 +74,10 @@ The archive excludes:
 - Access subjects.
 - Authentication provider records.
 - Session settings managed by Cloudflare Access.
+
+Export reads the profile, categories, payment methods, and subscriptions in one D1
+batch snapshot. A concurrent association edit therefore cannot produce an archive
+whose subscription references a different point-in-time resource set.
 
 Profile settings are imported only when the user explicitly selects that option during confirmation.
 
@@ -124,6 +136,8 @@ The format supports only safe display labels. It must never contain a complete c
   "symbol": { "type": "emoji", "value": "✨" },
   "websiteUrl": "https://example.com",
   "notes": null,
+  "emailReminderEnabled": false,
+  "emailReminderDaysBefore": null,
   "createdAt": "2026-08-01T08:00:00.000Z",
   "updatedAt": "2026-08-10T09:30:00.000Z"
 }
@@ -136,9 +150,9 @@ The archive intentionally omits `nextBillingOn` because it is derived and may be
 ```ts
 type ResourceSymbol = { type: "icon"; value: string } | { type: "emoji"; value: string } | null;
 
-type OpenSubListsArchiveV2 = {
+type OpenSubListsArchiveV3 = {
   format: "opensublists";
-  schemaVersion: 2;
+  schemaVersion: 3;
   archiveId: string;
   exportedAt: string;
   generator: {
@@ -149,6 +163,10 @@ type OpenSubListsArchiveV2 = {
     displayName: string | null;
     timezone: string;
     reportingCurrency: string;
+    preferredLocale: "en" | "zh-Hans";
+    defaultEmailReminderDaysBefore: number;
+    emailReminderLocalTime: string;
+    emailRemindersPaused: boolean;
   };
   categories: Array<{
     id: string;
@@ -188,6 +206,8 @@ type OpenSubListsArchiveV2 = {
     symbol: ResourceSymbol;
     websiteUrl: string | null;
     notes: string | null;
+    emailReminderEnabled: boolean;
+    emailReminderDaysBefore: number | null;
     createdAt: string;
     updatedAt: string;
   }>;
@@ -245,8 +265,10 @@ Validation errors include JSON-style paths but never echo complete sensitive rec
 {
   "archive": {
     "format": "opensublists",
-    "schemaVersion": 2
-  }
+    "schemaVersion": 3
+  },
+  "conflictStrategy": "skip",
+  "importProfile": false
 }
 ```
 
@@ -256,7 +278,7 @@ The actual archive contains all required fields. Example response:
 {
   "data": {
     "digest": "sha256-6f5902ac...",
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "counts": {
       "categories": 4,
       "paymentMethods": 2,
@@ -273,12 +295,21 @@ The actual archive contains all required fields. Example response:
         "code": "UNSUPPORTED_SOURCE_FIELD",
         "message": "A source price history will not be imported."
       }
-    ]
+    ],
+    "reminderImpact": {
+      "enabledPreferencesAfterApply": 0,
+      "senderCapabilityAvailable": false,
+      "willForceGlobalPause": false
+    }
   }
 }
 ```
 
-The digest is SHA-256 over a canonical serialization of the validated archive. Canonicalization uses the schema-defined property order, canonical decimal strings, and the array order present in the archive. It is not an authentication token.
+The digest is SHA-256 over a canonical serialization of the validated archive plus the
+reviewed conflict strategy, profile choice, conflict counts, sender capability, and
+reminder impact. Canonicalization uses the schema-defined property order, canonical
+decimal strings, and the array order present in the archive. The digest is an
+accident-prevention approval token, not an authentication token.
 
 ## 12. Confirmation Request
 
@@ -296,13 +327,22 @@ The digest is SHA-256 over a canonical serialization of the validated archive. C
 
 The server:
 
-1. Recalculates the digest.
+1. Recalculates the archive-and-review-context digest from current account state and
+   sender capability.
 2. Repeats full validation.
-3. Rejects a digest mismatch.
+3. Rejects a digest mismatch and requires a fresh preview when the archive, selected
+   options, reviewed conflicts, capability, or reminder impact changed.
 4. Applies the selected conflict strategy.
 5. Recalculates all imported next-billing dates.
-6. Writes the import atomically with D1 `batch()`.
-7. Returns created, updated, skipped, and warning counts.
+6. Compares the reviewed account fields and monotonic resource revision inside the
+   same D1 `batch()` that performs the writes.
+7. Writes the import atomically only when that compare-and-swap guard still matches.
+8. Returns created, updated, skipped, and warning counts.
+
+If another tab changes the profile, categories, payment methods, or subscriptions
+after confirmation reads its state but before the batch starts, D1 rolls back the
+entire batch and the API returns `409 IMPORT_STATE_CHANGED`. The client must run a new
+preview; it must not retry the stale confirmation automatically.
 
 The preview step is an accident-prevention workflow, not an authorization mechanism. Cloudflare Access remains the authorization boundary.
 
@@ -343,7 +383,10 @@ MVP limits:
 - Subscriptions: 50.
 - Notes: 10,000 Unicode code points per subscription.
 
-The importer compiles validated changes into a bounded D1 batch transaction. Any failed statement rolls back the entire import.
+The importer compiles validated changes into a bounded D1 batch transaction. Any
+failed statement rolls back the entire import. Migration `0006_resource_revisions.sql`
+adds the per-user resource revision and table triggers used by the transactional
+compare-and-swap guard.
 
 If future limits exceed practical batch constraints, imports should move to a resumable job model with an explicit staging area. The MVP must not silently fall back to partial writes.
 
@@ -424,26 +467,85 @@ generated or overwritten artifact to owner-read/write mode (`0600`). Text cells 
 begin with `=`, `+`, `-`, or `@` are prefixed with an apostrophe in the review CSV so
 spreadsheet applications treat untrusted resource names as text rather than formulas.
 
+### 15.2 v2-to-v3 Reminder-safe Operator Tool
+
+The provider-gated renewal-email implementation increments the current archive version
+rather than silently changing version 2. Version 3 adds these user-owned preferences:
+
+- Profile: `preferredLocale`, `defaultEmailReminderDaysBefore`,
+  `emailReminderLocalTime`, and `emailRemindersPaused`.
+- Subscription: `emailReminderEnabled` and nullable `emailReminderDaysBefore`, where
+  `null` means inherit the profile default.
+
+Operational `renewal_email_deliveries` rows, provider IDs, retry state, recipient
+addresses, and message content are never exported. Legacy transformations and native
+imports default every subscription to email disabled. Import preview counts and warns
+about any reviewed archive that would enable reminders before confirmation.
+
+If the deployment email capability is unavailable, a reviewed archive still preserves
+its per-subscription reminder preferences for portability, but the import forces
+`emailRemindersPaused = true` for that account. Preview states how many enabled choices
+will be stored but paused. Configuring a sender later does not send anything until the
+user explicitly reviews Settings and unpauses email. If the capability is available,
+preview still requires explicit confirmation before restoring any enabled choice.
+
+For this archive version, preview receives the selected `conflictStrategy` and
+`importProfile` beside the archive. It returns a structured `reminderImpact`:
+
+```ts
+type ReminderImportImpact = {
+  enabledPreferencesAfterApply: number;
+  senderCapabilityAvailable: boolean;
+  willForceGlobalPause: boolean;
+};
+```
+
+Changing either option reruns preview. Confirmation re-evaluates the capability and
+the final merged subscriptions after conflict handling, returns the final impact, and
+forces the user pause atomically whenever the sender is unavailable and at least one
+enabled preference results. This safeguard applies even when `importProfile` is false.
+`PATCH /me` rejects unpause until sender capability becomes available. The
+system-owned identity-conflict suspension reason is never exported, imported, or
+cleared by this workflow.
+
+The runtime accepts only version 3. Convert a private version-2 archive offline before
+previewing it in the application:
+
+```sh
+node tools/reminder-migration/cli.mjs \
+  --input /private/path/opensublists-archive-v2.json \
+  --output /private/path/opensublists-archive-v3.json
+```
+
+The transformer validates version 2 strictly, writes owner-only output, adds the
+account defaults shown above, and sets every migrated subscription to
+`emailReminderEnabled: false` with `emailReminderDaysBefore: null`. It refuses to
+overwrite an existing output unless `--overwrite` is supplied deliberately.
+
+For a version-1 archive, first run the v1-to-v2 refactor tool in §15.1, review its
+artifacts, and then run this v2-to-v3 transformer. No historical archive version is
+accepted by the Worker itself.
+
 ## 16. Native SubList Adapter
 
 Migration from the native SubList application is an adapter into the current OpenSubLists archive, not a special database writer.
 
 Expected mappings based on the current SubList application model:
 
-| Native concept               | Current OpenSubLists archive                                       |
-| ---------------------------- | ------------------------------------------------------------------ |
-| Subscription                 | Subscription                                                       |
-| Category                     | Category                                                           |
-| Payment method               | Payment method                                                     |
-| Billing amount and currency  | `amount` and `currency`                                            |
-| Billing interval and unit    | `recurrence`                                                       |
-| Website and notes            | Same fields                                                        |
-| Archived state               | `archivedAt` when representable                                    |
-| Pause history                | Warning; not imported                                              |
-| Price history                | Warning; current amount only                                       |
-| Trial or introductory offer  | Warning; base recurring subscription only                          |
-| Custom icons and backgrounds | Map one supported symbol when exact; otherwise warn and use `null` |
-| Native reminder settings     | Warning; reminder rules are outside scope                          |
+| Native concept               | Current OpenSubLists archive                                                 |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| Subscription                 | Subscription                                                                 |
+| Category                     | Category                                                                     |
+| Payment method               | Payment method                                                               |
+| Billing amount and currency  | `amount` and `currency`                                                      |
+| Billing interval and unit    | `recurrence`                                                                 |
+| Website and notes            | Same fields                                                                  |
+| Archived state               | `archivedAt` when representable                                              |
+| Pause history                | Warning; not imported                                                        |
+| Price history                | Warning; current amount only                                                 |
+| Trial or introductory offer  | Warning; base recurring subscription only                                    |
+| Custom icons and backgrounds | Map one supported symbol when exact; otherwise warn and use `null`           |
+| Native reminder settings     | Warning; do not infer email opt-in without a reviewed, explicit source field |
 
 Implementation requires a redacted real export fixture. Field mappings must not be guessed from the native database when a supported JSON export is available.
 
@@ -471,6 +573,10 @@ Implementation requires a redacted real export fixture. Field mappings must not 
 - Reject any archive version other than the current version.
 - Apply every conflict strategy deterministically.
 - Roll back all changes when one write fails.
-- Reject digest mismatch.
+- Reject archive, option, conflict-state, capability, and reminder-impact digest
+  mismatches.
 - Ensure one user cannot conflict with or overwrite another user's resources.
 - Report every unsupported native SubList field.
+- Reminder archive tests cover disabled legacy defaults, inherited versus overridden
+  lead days, persisted locale, explicit enable impact, forced pause without a sender,
+  and omission of every delivery/provider field.

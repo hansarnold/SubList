@@ -15,6 +15,11 @@ const result: ImportResult = {
     { path: "legacyOne", code: "UNSUPPORTED_SOURCE_FIELD", message: "First warning" },
     { path: "legacyTwo", code: "UNSUPPORTED_SOURCE_FIELD", message: "Second warning" },
   ],
+  reminderImpact: {
+    enabledPreferencesAfterApply: 0,
+    senderCapabilityAvailable: true,
+    willForceGlobalPause: false,
+  },
 };
 
 afterEach(() => cleanup());

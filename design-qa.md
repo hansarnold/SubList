@@ -1,42 +1,49 @@
-# Design QA
+# Phase 4 Design QA
 
-Date: 2026-08-23
+Date: 2026-08-24
+
+## Scope
+
+- App: `http://localhost:5173`
+- Production preview: `http://127.0.0.1:5175`
+- Documentation preview: `http://127.0.0.1:4174/SubList/`
+- Dashboard reference: `docs/assets/open-sublists-dashboard-prototype-web.png`
+- Subscription-list reference: `docs/assets/open-sublists-subscriptions-prototype-web.png`
+
+## Viewports and flows checked
+
+- Desktop: 1487 x 1058
+- Compact desktop/tablet: 900 x 800
+- Mobile: 390 x 844
+- Dashboard reporting estimates, upcoming charges, category breakdown, payment-method breakdown, chart toggles, and accessible text equivalents
+- Subscription search, sorting, filters, cards, responsive navigation, new/edit form, and validation behavior
+- Saved and preset category selection, saved and preset payment-method selection, custom resource creation, and immediate selection of a newly created resource
+- Per-subscription email-reminder opt-in, default-off behavior, capability-disabled explanation, account reminder timing, language, and global pause controls
+- Documentation home, self-hosting guide, direct route reload, mobile layout, and local search
 
 ## Reference comparison
 
-- Compared `/dashboard` at 1487 × 1058 against `docs/assets/open-sublists-dashboard-prototype-web.png` in a single side-by-side image.
-- Compared `/subscriptions` at 1487 × 1058 against `docs/assets/open-sublists-subscriptions-prototype-web.png` in the same comparison pass.
-- Verified the shared responsive web shell, navigation hierarchy, summary surfaces, spacing, card treatment, filters, typography, and primary action placement.
-- Differences in product names, amounts, category counts, service artwork, and record density are expected because the references contain directional mock data. The implementation also retains the required archived-state filter.
+The reference and implementation were compared side by side at the same desktop viewport.
 
-## Responsive verification
+- The subscription list preserves the reference hierarchy, navigation, card density, filters, and overall spacing.
+- The dashboard preserves the reference visual language while adding the planned reporting-currency estimates card above the existing upcoming-charge and breakdown sections.
+- Tablet and mobile layouts keep the primary task path usable without clipped content or overlapping controls.
 
-- Wide website: 1487 × 1058.
-- Tablet-width website: 900 × 800.
-- Narrow website: 390 × 844.
-- Verified sidebar-to-mobile-navigation transition, single-column subscription cards, readable per-currency totals, filter disclosure, fixed mobile navigation, and form actions above the mobile navigation.
-- Verified the tablet form preview stays below the fixed web header.
+## Interaction and accessibility checks
 
-## Interaction verification
+- Category and payment-method chart controls change the visible chart state while retaining readable text summaries.
+- Pressing Enter in a resource search field does not submit the outer subscription form.
+- Submitting a custom resource dialog does not bubble into the outer subscription form.
+- Resource controls expose clear labels, empty states, saved choices, preset choices, and custom-creation actions.
+- Reminder opt-in remains off unless explicitly enabled on an individual subscription.
+- Local email delivery remains disabled; the interface explains why reminder controls cannot be enabled in that environment.
 
-- Dashboard 7-day and 30-day controls.
-- Subscription search with multi-character typing and debounced URL/API updates.
-- Status, category, payment-method, currency, and archived filters.
-- Grid and compact-list views.
-- Subscription detail and edit routes.
-- Archive, archived-only filtering, unarchive, and restored list state.
-- Create-form validation, first-invalid-field focus, and error `aria-describedby` wiring.
-- Profile, categories, payment methods, data import/export, and local sign-out explanation.
-- English and Simplified Chinese interface switching.
+## Runtime and documentation checks
 
-## Issues corrected during QA
-
-- Kept subscription results mounted while search and filter queries refresh.
-- Debounced search input so typing is not interrupted by request churn.
-- Prevented narrow summary currency amounts from truncating.
-- Removed duplicate wide-layout Add Subscription actions.
-- Positioned sticky form content around the fixed responsive navigation.
-- Connected form errors to controls and focused the first invalid field.
-- Removed the non-functional Cloudflare Access sign-out control from local development.
+- The final production bundle loaded successfully in the in-app browser.
+- The scheduled reminder handler was manually triggered once through the local Cloudflare endpoint and returned `200 OK`; delivery was skipped because the sender is intentionally unavailable.
+- Temporary category and payment-method records created during browser QA were deleted.
+- Documentation builds with the repository-relative `/SubList/` base and its search index returns reminder configuration results.
+- The only remaining build notice is the non-blocking large-client-chunk warning caused primarily by the charting dependency.
 
 final result: passed

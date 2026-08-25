@@ -1,20 +1,25 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconArrowLeft, IconCalendarEvent, IconChevronDown } from "@tabler/icons-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { IconArrowLeft, IconBell, IconCalendarEvent, IconChevronDown } from "@tabler/icons-react";
+import { type FormEvent, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError, api } from "../../api/client";
-import { COMMON_ICON_KEYS, type CommonIconKey, type ResourceSymbol } from "../../../domain/symbol";
+import { categoriesQueryKey, paymentMethodsQueryKey, sessionQueryKey } from "../../api/query-keys";
+import { type ResourceSymbol } from "../../../domain/symbol";
 import type {
   Category,
   PaymentMethod,
   RecurrenceUnit,
   Subscription,
   SubscriptionInput,
+  User,
 } from "../../api/types";
 import { Button, Field, InlineNotice, LoadingPage, QueryError } from "../../components/ui";
+import { ResourceAssociationField } from "../../components/ResourceAssociationField";
 import { SymbolPicker } from "../../components/SymbolPicker";
+import { useSymbolPickerCopy } from "../../components/useSymbolPickerCopy";
 import { formatDate, previewOccurrences } from "../../utils/format";
+import { buildReminderDatePreview } from "./reminder-preview";
 
 type FormState = {
   name: string;
@@ -29,6 +34,8 @@ type FormState = {
   paymentMethodId: string;
   websiteUrl: string;
   notes: string;
+  emailReminderEnabled: boolean;
+  emailReminderDaysBefore: string;
 };
 
 type FormErrors = Partial<Record<keyof FormState | "form", string>>;
@@ -42,8 +49,10 @@ const formFieldIds: Partial<Record<keyof FormState, string>> = {
   anchorOn: "subscription-anchor-on",
   categoryId: "subscription-category",
   paymentMethodId: "subscription-payment-method",
+  emailReminderEnabled: "subscription-email-reminder-enabled",
   websiteUrl: "subscription-website-url",
   notes: "subscription-notes",
+  emailReminderDaysBefore: "subscription-email-reminder-days-before",
 };
 
 const formFocusOrder: Array<keyof FormState> = [
@@ -55,6 +64,7 @@ const formFocusOrder: Array<keyof FormState> = [
   "anchorOn",
   "categoryId",
   "paymentMethodId",
+  "emailReminderDaysBefore",
   "websiteUrl",
   "notes",
 ];
@@ -91,6 +101,8 @@ function initialState(): FormState {
     paymentMethodId: "",
     websiteUrl: "",
     notes: "",
+    emailReminderEnabled: false,
+    emailReminderDaysBefore: "",
   };
 }
 
@@ -108,6 +120,11 @@ function stateFromSubscription(subscription: Subscription): FormState {
     paymentMethodId: subscription.paymentMethodId ?? "",
     websiteUrl: subscription.websiteUrl ?? "",
     notes: subscription.notes ?? "",
+    emailReminderEnabled: subscription.emailReminderEnabled,
+    emailReminderDaysBefore:
+      subscription.emailReminderDaysBefore === null
+        ? ""
+        : String(subscription.emailReminderDaysBefore),
   };
 }
 
@@ -139,6 +156,9 @@ function toInput(state: FormState): SubscriptionInput {
     paymentMethodId: state.paymentMethodId || null,
     websiteUrl: state.websiteUrl.trim() || null,
     notes: state.notes.trim() || null,
+    emailReminderEnabled: state.emailReminderEnabled,
+    emailReminderDaysBefore:
+      state.emailReminderDaysBefore === "" ? null : Number(state.emailReminderDaysBefore),
   };
 }
 
@@ -158,7 +178,15 @@ type SubscriptionFormEditorProps = {
   subscription: Subscription | undefined;
   categories: Category[];
   paymentMethods: PaymentMethod[];
-  reportingCurrency: string;
+  categoriesLoading: boolean;
+  paymentMethodsLoading: boolean;
+  categoriesError: unknown;
+  paymentMethodsError: unknown;
+  retryCategories: () => void;
+  retryPaymentMethods: () => void;
+  userId: string;
+  account: User;
+  emailRemindersAvailable: boolean;
   backTo: string;
 };
 
@@ -167,41 +195,60 @@ function SubscriptionFormEditor({
   subscription,
   categories,
   paymentMethods,
-  reportingCurrency,
+  categoriesLoading,
+  paymentMethodsLoading,
+  categoriesError,
+  paymentMethodsError,
+  retryCategories,
+  retryPaymentMethods,
+  userId,
+  account,
+  emailRemindersAvailable,
   backTo,
 }: SubscriptionFormEditorProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const isEditing = Boolean(subscriptionId);
   const [form, setForm] = useState<FormState>(() =>
     subscription
       ? stateFromSubscription(subscription)
-      : { ...initialState(), currency: reportingCurrency },
+      : { ...initialState(), currency: account.reportingCurrency },
   );
   const [errors, setErrors] = useState<FormErrors>({});
-  const iconLabels = useMemo(
-    () =>
-      Object.fromEntries(COMMON_ICON_KEYS.map((key) => [key, t(`symbols.icons.${key}`)])) as Record<
-        CommonIconKey,
-        string
-      >,
-    [t],
+  const [resourceCreatePending, setResourceCreatePending] = useState({
+    category: false,
+    paymentMethod: false,
+  });
+  const symbolPicker = useSymbolPickerCopy();
+  const setCategoryPending = useCallback(
+    (pending: boolean) =>
+      setResourceCreatePending((current) =>
+        current.category === pending ? current : { ...current, category: pending },
+      ),
+    [],
   );
-  const emojiOptions = useMemo(
-    () =>
-      [
-        ["⭐", "star"],
-        ["🎬", "movie"],
-        ["🎵", "music"],
-        ["☁️", "cloud"],
-        ["💳", "card"],
-        ["🧾", "receipt"],
-        ["✈️", "travel"],
-        ["🛠️", "tools"],
-      ].map(([value, key]) => ({ value: value ?? "", label: t(`symbols.emojis.${key}`) })),
-    [t],
+  const setPaymentMethodPending = useCallback(
+    (pending: boolean) =>
+      setResourceCreatePending((current) =>
+        current.paymentMethod === pending ? current : { ...current, paymentMethod: pending },
+      ),
+    [],
   );
+  const inlineResourceBusy = resourceCreatePending.category || resourceCreatePending.paymentMethod;
+  const categoryAssociationId =
+    categoriesLoading || categoriesError
+      ? form.categoryId
+      : categories.some((category) => category.id === form.categoryId)
+        ? form.categoryId
+        : "";
+  const paymentMethodAssociationId =
+    paymentMethodsLoading || paymentMethodsError
+      ? form.paymentMethodId
+      : paymentMethods.some((paymentMethod) => paymentMethod.id === form.paymentMethodId)
+        ? form.paymentMethodId
+        : "";
 
   const mutation = useMutation({
     mutationFn: (input: SubscriptionInput) =>
@@ -250,6 +297,51 @@ function SubscriptionFormEditor({
       }),
     [form.anchorOn, form.endOfMonth, form.recurrenceCount, form.recurrenceUnit],
   );
+  const reminderLeadIsCustom = form.emailReminderDaysBefore !== "";
+  const effectiveReminderDaysBefore = reminderLeadIsCustom
+    ? Number(form.emailReminderDaysBefore)
+    : account.defaultEmailReminderDaysBefore;
+  const persistedReminderEnabled = subscription?.emailReminderEnabled ?? false;
+  const reminderToggleDisabled =
+    mutation.isPending || (!emailRemindersAvailable && !persistedReminderEnabled);
+  const reminderPreview = useMemo(() => {
+    if (
+      !form.emailReminderEnabled ||
+      !Number.isInteger(effectiveReminderDaysBefore) ||
+      effectiveReminderDaysBefore < 0 ||
+      effectiveReminderDaysBefore > 365 ||
+      !Number.isInteger(Number(form.recurrenceCount)) ||
+      Number(form.recurrenceCount) < 1 ||
+      Number(form.recurrenceCount) > 1200 ||
+      !isRealDate(form.anchorOn)
+    ) {
+      return null;
+    }
+
+    try {
+      return buildReminderDatePreview(
+        {
+          unit: form.recurrenceUnit,
+          count: Number(form.recurrenceCount),
+          anchorOn: form.anchorOn,
+          anchorMode:
+            form.recurrenceUnit === "month" && form.endOfMonth ? "end_of_month" : "calendar_day",
+        },
+        effectiveReminderDaysBefore,
+        account.timezone,
+      );
+    } catch {
+      return null;
+    }
+  }, [
+    account.timezone,
+    effectiveReminderDaysBefore,
+    form.anchorOn,
+    form.emailReminderEnabled,
+    form.endOfMonth,
+    form.recurrenceCount,
+    form.recurrenceUnit,
+  ]);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -276,6 +368,15 @@ function SubscriptionFormEditor({
       next.recurrenceCount = t("form.required");
     }
     if (!isRealDate(form.anchorOn)) next.anchorOn = t("form.invalidDate");
+    if (
+      form.emailReminderEnabled &&
+      reminderLeadIsCustom &&
+      (!/^\d+$/.test(form.emailReminderDaysBefore) ||
+        Number(form.emailReminderDaysBefore) < 0 ||
+        Number(form.emailReminderDaysBefore) > 365)
+    ) {
+      next.emailReminderDaysBefore = t("form.invalidReminderDays");
+    }
     if (form.websiteUrl.trim()) {
       try {
         const url = new URL(form.websiteUrl);
@@ -290,13 +391,20 @@ function SubscriptionFormEditor({
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (inlineResourceBusy) return;
     const validationErrors = validate();
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) {
       focusFirstInvalidField(validationErrors);
       return;
     }
-    mutation.mutate(toInput(form));
+    mutation.mutate(
+      toInput({
+        ...form,
+        categoryId: categoryAssociationId,
+        paymentMethodId: paymentMethodAssociationId,
+      }),
+    );
   }
 
   return (
@@ -328,18 +436,8 @@ function SubscriptionFormEditor({
             <SymbolPicker
               value={form.symbol}
               onChange={(symbol) => update("symbol", symbol)}
-              iconLabels={iconLabels}
-              emojiOptions={emojiOptions}
-              labels={{
-                legend: t("symbols.legend"),
-                commonIcons: t("symbols.commonIcons"),
-                emoji: t("symbols.emoji"),
-                emojiInput: t("symbols.emojiInput"),
-                emojiInputPlaceholder: t("symbols.emojiInputPlaceholder"),
-                invalidEmoji: t("symbols.invalidEmoji"),
-                clear: t("symbols.clear"),
-              }}
-              disabled={mutation.isPending}
+              {...symbolPicker}
+              disabled={mutation.isPending || inlineResourceBusy}
             />
             <div className="field-row field-row--money">
               <Field id={formFieldIds.amount} label={t("form.amount")} error={errors.amount}>
@@ -413,49 +511,161 @@ function SubscriptionFormEditor({
               />
             </Field>
             <div className="field-row">
-              <Field
-                id={formFieldIds.categoryId}
-                label={t("form.category")}
-                error={errors.categoryId}
-              >
-                <span className="select-wrap">
-                  <select
-                    id={formFieldIds.categoryId}
-                    value={form.categoryId}
-                    onChange={(event) => update("categoryId", event.target.value)}
-                  >
-                    <option value="">{t("form.none")}</option>
-                    {categories.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name}
-                      </option>
-                    ))}
-                  </select>
-                  <IconChevronDown size={17} />
-                </span>
-              </Field>
-              <Field
-                id={formFieldIds.paymentMethodId}
-                label={t("form.paymentMethod")}
-                error={errors.paymentMethodId}
-              >
-                <span className="select-wrap">
-                  <select
-                    id={formFieldIds.paymentMethodId}
-                    value={form.paymentMethodId}
-                    onChange={(event) => update("paymentMethodId", event.target.value)}
-                  >
-                    <option value="">{t("form.none")}</option>
-                    {paymentMethods.map((payment) => (
-                      <option key={payment.id} value={payment.id}>
-                        {payment.name}
-                      </option>
-                    ))}
-                  </select>
-                  <IconChevronDown size={17} />
-                </span>
-              </Field>
+              <ResourceAssociationField
+                id={formFieldIds.categoryId ?? "subscription-category"}
+                kind="category"
+                userId={userId}
+                value={categoryAssociationId}
+                resources={categories}
+                loading={categoriesLoading}
+                error={categoriesError}
+                validationError={errors.categoryId}
+                disabled={mutation.isPending}
+                manageFrom={`${location.pathname}${location.search}`}
+                onChange={(id) => update("categoryId", id)}
+                onRetry={retryCategories}
+                onPendingChange={setCategoryPending}
+              />
+              <ResourceAssociationField
+                id={formFieldIds.paymentMethodId ?? "subscription-payment-method"}
+                kind="payment-method"
+                userId={userId}
+                value={paymentMethodAssociationId}
+                resources={paymentMethods}
+                loading={paymentMethodsLoading}
+                error={paymentMethodsError}
+                validationError={errors.paymentMethodId}
+                disabled={mutation.isPending}
+                manageFrom={`${location.pathname}${location.search}`}
+                onChange={(id) => update("paymentMethodId", id)}
+                onRetry={retryPaymentMethods}
+                onPendingChange={setPaymentMethodPending}
+              />
             </div>
+          </section>
+
+          <section className="surface form-section reminder-section">
+            <div className="reminder-section__heading">
+              <IconBell size={21} aria-hidden="true" />
+              <div>
+                <h2>{t("form.emailReminder")}</h2>
+                <p>{t("form.emailReminderHelp")}</p>
+              </div>
+            </div>
+            {!emailRemindersAvailable ? (
+              <InlineNotice tone="warning">
+                {subscription?.emailReminderEnabled
+                  ? t("form.reminderUnavailableRetained")
+                  : t("form.reminderUnavailable")}
+              </InlineNotice>
+            ) : null}
+            {account.emailReminderSystemSuspended ? (
+              <InlineNotice tone="danger">{t("form.reminderSystemSuspended")}</InlineNotice>
+            ) : account.emailRemindersPaused ? (
+              <InlineNotice tone="warning">{t("form.remindersPaused")}</InlineNotice>
+            ) : null}
+            <label className="checkbox-field checkbox-field--prominent">
+              <input
+                id={formFieldIds.emailReminderEnabled}
+                type="checkbox"
+                checked={form.emailReminderEnabled}
+                disabled={reminderToggleDisabled}
+                aria-invalid={errors.emailReminderEnabled ? true : undefined}
+                aria-describedby={
+                  errors.emailReminderEnabled
+                    ? `${formFieldIds.emailReminderEnabled}-error`
+                    : undefined
+                }
+                onChange={(event) => update("emailReminderEnabled", event.target.checked)}
+              />
+              <span>
+                <strong>{t("form.enableEmailReminder")}</strong>
+                <small>{t("form.enableEmailReminderHint")}</small>
+              </span>
+            </label>
+            {errors.emailReminderEnabled ? (
+              <span className="field__error" id={`${formFieldIds.emailReminderEnabled}-error`}>
+                {errors.emailReminderEnabled}
+              </span>
+            ) : null}
+
+            {form.emailReminderEnabled ? (
+              <div className="reminder-fields">
+                <Field
+                  label={t("form.reminderDestination")}
+                  hint={t("form.reminderDestinationHint")}
+                >
+                  <input value={account.email} readOnly disabled />
+                </Field>
+                <fieldset className="choice-fieldset">
+                  <legend>{t("form.reminderLeadTime")}</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="emailReminderLeadMode"
+                      checked={!reminderLeadIsCustom}
+                      onChange={() => update("emailReminderDaysBefore", "")}
+                    />
+                    <span>
+                      <strong>
+                        {t("form.useAccountReminderDefault", {
+                          count: account.defaultEmailReminderDaysBefore,
+                        })}
+                      </strong>
+                      <small>{t("form.inheritsReminderDefault")}</small>
+                    </span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="emailReminderLeadMode"
+                      checked={reminderLeadIsCustom}
+                      onChange={() =>
+                        update(
+                          "emailReminderDaysBefore",
+                          String(account.defaultEmailReminderDaysBefore),
+                        )
+                      }
+                    />
+                    <span>
+                      <strong>{t("form.useCustomReminderLead")}</strong>
+                      <small>{t("form.customReminderLeadHint")}</small>
+                    </span>
+                  </label>
+                </fieldset>
+                {reminderLeadIsCustom ? (
+                  <Field
+                    id={formFieldIds.emailReminderDaysBefore}
+                    label={t("form.reminderDaysBefore")}
+                    hint={t("form.reminderDaysBeforeHint")}
+                    error={errors.emailReminderDaysBefore}
+                  >
+                    <input
+                      type="number"
+                      min={0}
+                      max={365}
+                      inputMode="numeric"
+                      value={form.emailReminderDaysBefore}
+                      onChange={(event) => update("emailReminderDaysBefore", event.target.value)}
+                    />
+                  </Field>
+                ) : null}
+                {reminderPreview ? (
+                  <div className="reminder-preview" role="status">
+                    <strong>{t("form.reminderPreviewTitle")}</strong>
+                    <p>
+                      {t("form.reminderPreview", {
+                        reminderDate: formatDate(reminderPreview.planningOn, i18n.language),
+                        localTime: account.emailReminderLocalTime,
+                        timeZone: account.timezone,
+                        billingDate: formatDate(reminderPreview.billingOn, i18n.language),
+                      })}
+                    </p>
+                    <small>{t("form.reminderEstimateDisclaimer")}</small>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <section className="surface form-section form-section--advanced">
@@ -523,7 +733,7 @@ function SubscriptionFormEditor({
             <Link className="button button--secondary" to={backTo}>
               {t("app.cancel")}
             </Link>
-            <Button type="submit" disabled={mutation.isPending}>
+            <Button type="submit" disabled={mutation.isPending || inlineResourceBusy}>
               {mutation.isPending
                 ? t("app.saving")
                 : isEditing
@@ -541,6 +751,8 @@ export function SubscriptionFormPage() {
   const { subscriptionId } = useParams();
   const [searchParams] = useSearchParams();
   const isEditing = Boolean(subscriptionId);
+  const sessionQuery = useQuery({ queryKey: sessionQueryKey, queryFn: api.session });
+  const userId = sessionQuery.data?.user.id ?? "pending";
   const subscriptionQuery = useQuery({
     queryKey: ["subscription", subscriptionId],
     queryFn: () => api.subscription(subscriptionId ?? ""),
@@ -548,18 +760,21 @@ export function SubscriptionFormPage() {
   });
   const [categoriesQuery, paymentMethodsQuery, meQuery] = useQueries({
     queries: [
-      { queryKey: ["categories"], queryFn: api.categories },
-      { queryKey: ["payment-methods"], queryFn: api.paymentMethods },
+      {
+        queryKey: categoriesQueryKey(userId),
+        queryFn: api.categories,
+        enabled: Boolean(sessionQuery.data),
+      },
+      {
+        queryKey: paymentMethodsQueryKey(userId),
+        queryFn: api.paymentMethods,
+        enabled: Boolean(sessionQuery.data),
+      },
       { queryKey: ["me"], queryFn: api.me },
     ],
   });
 
-  if (
-    categoriesQuery.isPending ||
-    paymentMethodsQuery.isPending ||
-    meQuery.isPending ||
-    (isEditing && subscriptionQuery.isPending)
-  ) {
+  if (sessionQuery.isPending || meQuery.isPending || (isEditing && subscriptionQuery.isPending)) {
     return <LoadingPage variant="form" />;
   }
   if (isEditing && subscriptionQuery.isError) {
@@ -570,7 +785,10 @@ export function SubscriptionFormPage() {
       />
     );
   }
-  const supportingError = categoriesQuery.error ?? paymentMethodsQuery.error ?? meQuery.error;
+  if (sessionQuery.isError) {
+    return <QueryError error={sessionQuery.error} onRetry={() => void sessionQuery.refetch()} />;
+  }
+  const supportingError = meQuery.error;
   if (supportingError) {
     return <QueryError error={supportingError} />;
   }
@@ -586,7 +804,15 @@ export function SubscriptionFormPage() {
       subscription={subscriptionQuery.data}
       categories={categoriesQuery.data ?? []}
       paymentMethods={paymentMethodsQuery.data ?? []}
-      reportingCurrency={meQuery.data?.reportingCurrency ?? "USD"}
+      categoriesLoading={categoriesQuery.isPending}
+      paymentMethodsLoading={paymentMethodsQuery.isPending}
+      categoriesError={categoriesQuery.error}
+      paymentMethodsError={paymentMethodsQuery.error}
+      retryCategories={() => void categoriesQuery.refetch()}
+      retryPaymentMethods={() => void paymentMethodsQuery.refetch()}
+      userId={sessionQuery.data.user.id}
+      account={meQuery.data}
+      emailRemindersAvailable={sessionQuery.data.capabilities.emailReminders}
       backTo={backTo}
     />
   );

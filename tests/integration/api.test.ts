@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { applyD1Migrations, createExecutionContext } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, inject, it } from "vitest";
 import { OpenSubListsService } from "../../src/application/service";
+import type { OpenSubListsArchiveV3 } from "../../src/shared/api-types";
 import { importRequestSchema } from "../../src/shared/api-types/schemas";
 import worker from "../../src/worker";
 import { D1OpenSubListsRepository } from "../../src/worker/db/repository";
@@ -119,7 +120,7 @@ describe("OpenSubLists Worker API", () => {
     const importResponse = await api("/api/v1/imports/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN },
-      body: JSON.stringify({ archive }),
+      body: JSON.stringify({ archive, conflictStrategy: "skip", importProfile: false }),
     });
     expect(importResponse.status).toBe(422);
   });
@@ -160,7 +161,14 @@ describe("OpenSubLists Worker API", () => {
         upcoming: Array<{ subscriptionId: string }>;
         totalsByCurrency: Array<{ currency: string; upcomingAmount: string }>;
         categoryBreakdown: Array<{ subscriptionCount: number }>;
-        paymentMethodBreakdown: Array<{ paymentMethodKind: string | null }>;
+        paymentMethodBreakdown: Array<{
+          paymentMethodKind: string | null;
+          totalsByCurrency: Array<{
+            currency: string;
+            monthlyEstimate: string;
+            annualizedEstimate: string;
+          }>;
+        }>;
       };
     }>();
     expect(dashboard.data.upcoming).toHaveLength(3);
@@ -172,6 +180,12 @@ describe("OpenSubLists Worker API", () => {
     );
     expect(dashboard.data.categoryBreakdown[0]?.subscriptionCount).toBe(1);
     expect(dashboard.data.paymentMethodBreakdown[0]?.paymentMethodKind).toBe("card");
+    const usdPaymentTotals = dashboard.data.paymentMethodBreakdown[0]?.totalsByCurrency.find(
+      (totals) => totals.currency === "USD",
+    );
+    expect(usdPaymentTotals).toBeDefined();
+    expect(typeof usdPaymentTotals?.monthlyEstimate).toBe("string");
+    expect(typeof usdPaymentTotals?.annualizedEstimate).toBe("string");
   });
 
   it("requires exactly one currency filter for amount sorting", async () => {
@@ -231,24 +245,72 @@ describe("OpenSubLists Worker API", () => {
   });
 
   it("exports a deterministic private archive and previews it without writes", async () => {
-    await post("/api/v1/categories", {
+    const category = await post<{ id: string }>("/api/v1/categories", {
       name: "Utilities",
       color: "#0EA5E9",
       position: 0,
     });
+    const paymentMethod = await post<{ id: string }>("/api/v1/payment-methods", {
+      name: "Visa",
+      kind: "card",
+      label: "•••• 1234",
+      position: 0,
+    });
+    const subscription = await post<{ id: string }>("/api/v1/subscriptions", {
+      name: "Hosting",
+      amount: "5",
+      currency: "USD",
+      recurrence: {
+        unit: "month",
+        count: 1,
+        anchorOn: "2026-08-23",
+        anchorMode: "calendar_day",
+      },
+      categoryId: category.id,
+      paymentMethodId: paymentMethod.id,
+      websiteUrl: null,
+      notes: null,
+    });
     const exported = await api("/api/v1/export");
     expect(exported.status).toBe(200);
     expect(exported.headers.get("Content-Disposition")).toMatch(/^attachment;/);
-    const archive = await exported.json<Record<string, unknown>>();
+    const archive = await exported.json<{
+      format: string;
+      categories: Array<{ id: string }>;
+      paymentMethods: Array<{ id: string }>;
+      subscriptions: Array<{
+        id: string;
+        categoryId: string | null;
+        paymentMethodId: string | null;
+      }>;
+    }>();
     expect(archive.format).toBe("opensublists");
     expect(archive).not.toHaveProperty("userId");
+    expect(archive.categories).toContainEqual(expect.objectContaining({ id: category.id }));
+    expect(archive.paymentMethods).toContainEqual(
+      expect.objectContaining({ id: paymentMethod.id }),
+    );
+    expect(archive.subscriptions).toContainEqual(
+      expect.objectContaining({
+        id: subscription.id,
+        categoryId: category.id,
+        paymentMethodId: paymentMethod.id,
+        name: "Hosting",
+        amount: "5",
+        currency: "USD",
+      }),
+    );
 
     const preview = await post<{
       digest: string;
-      conflicts: { categories: number };
-    }>("/api/v1/imports/preview", { archive });
+      conflicts: { categories: number; paymentMethods: number; subscriptions: number };
+    }>("/api/v1/imports/preview", {
+      archive,
+      conflictStrategy: "skip",
+      importProfile: false,
+    });
     expect(preview.digest).toMatch(/^sha256-[a-f0-9]{64}$/);
-    expect(preview.conflicts.categories).toBe(1);
+    expect(preview.conflicts).toEqual({ categories: 1, paymentMethods: 1, subscriptions: 1 });
   });
 
   it("returns a stable error for unsupported archive schema versions", async () => {
@@ -256,12 +318,16 @@ describe("OpenSubLists Worker API", () => {
     const cases = [
       {
         path: "/api/v1/imports/preview",
-        body: { archive: { ...archiveWithSubscriptions(0), schemaVersion: 1 } },
+        body: {
+          archive: { ...archiveWithSubscriptions(0), schemaVersion: 1 },
+          conflictStrategy: "skip",
+          importProfile: false,
+        },
       },
       {
         path: "/api/v1/imports",
         body: {
-          archive: { ...archiveWithSubscriptions(0), schemaVersion: 3 },
+          archive: { ...archiveWithSubscriptions(0), schemaVersion: 2 },
           expectedDigest: `sha256-${"0".repeat(64)}`,
           conflictStrategy: "skip",
           importProfile: false,
@@ -322,7 +388,7 @@ describe("OpenSubLists Worker API", () => {
 
     expect((await repository.getCategory("user-a", sharedId))?.name).toBe("A category");
     expect((await repository.getCategory("user-b", sharedId))?.name).toBe("B category");
-    await repository.deleteCategory("user-a", sharedId);
+    await repository.deleteCategory("user-a", sharedId, now + 1);
     expect(await repository.getCategory("user-a", sharedId)).toBeNull();
     expect((await repository.getCategory("user-b", sharedId))?.name).toBe("B category");
   });
@@ -392,7 +458,11 @@ describe("OpenSubLists Worker API", () => {
   it("imports a complete max-size archive with bounded bulk statements", async () => {
     await api("/api/v1/session");
     const archive = archiveWithSubscriptions(50);
-    const preview = await post<{ digest: string }>("/api/v1/imports/preview", { archive });
+    const preview = await post<{ digest: string }>("/api/v1/imports/preview", {
+      archive,
+      conflictStrategy: "skip",
+      importProfile: false,
+    });
     const result = await post<{ created: { subscriptions: number } }>("/api/v1/imports", {
       archive,
       expectedDigest: preview.digest,
@@ -407,6 +477,111 @@ describe("OpenSubLists Worker API", () => {
     expect(count).toBe(50);
   });
 
+  it("rolls back the entire import when account resources change during apply", async () => {
+    const sessionResponse = await api("/api/v1/session");
+    const session = await sessionResponse.json<{ data: { user: { id: string } } }>();
+    const userId = session.data.user.id;
+    const repository = new D1OpenSubListsRepository(env.DB);
+    const categoryId = crypto.randomUUID();
+    const paymentMethodId = crypto.randomUUID();
+    await repository.createCategory(userId, {
+      id: categoryId,
+      name: "Existing category",
+      nameKey: "existing category",
+      color: "#123456",
+      symbol: null,
+      position: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const timestamp = new Date().toISOString();
+    const archive = {
+      ...archiveWithSubscriptions(0),
+      categories: [
+        {
+          id: categoryId,
+          name: "Imported category",
+          color: "#654321",
+          symbol: null,
+          position: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+      paymentMethods: [
+        {
+          id: paymentMethodId,
+          name: "Imported card",
+          kind: "card" as const,
+          label: "•••• 1234",
+          symbol: null,
+          position: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+    };
+    const preview = await new OpenSubListsService(repository).previewImport(userId, {
+      archive,
+      conflictStrategy: "overwrite",
+      importProfile: false,
+    });
+
+    class RacingApplyRepository extends D1OpenSubListsRepository {
+      private raced = false;
+
+      override async applyImport(...args: Parameters<D1OpenSubListsRepository["applyImport"]>) {
+        if (!this.raced) {
+          this.raced = true;
+          await this.deleteCategory(args[0], categoryId, 2);
+        }
+        return super.applyImport(...args);
+      }
+    }
+
+    const request = importRequestSchema.parse({
+      archive,
+      expectedDigest: preview.digest,
+      conflictStrategy: "overwrite",
+      importProfile: false,
+      confirmed: true,
+    });
+    await expect(
+      new OpenSubListsService(new RacingApplyRepository(env.DB)).importArchive(userId, request),
+    ).rejects.toMatchObject({ code: "IMPORT_STATE_CHANGED", status: 409 });
+    expect(await repository.getPaymentMethod(userId, paymentMethodId)).toBeNull();
+  });
+
+  it("requires a new import preview when a reviewed option changes", async () => {
+    await api("/api/v1/session");
+    const archive = archiveWithSubscriptions(1);
+    const preview = await post<{ digest: string }>("/api/v1/imports/preview", {
+      archive,
+      conflictStrategy: "skip",
+      importProfile: false,
+    });
+
+    const response = await api("/api/v1/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: ORIGIN },
+      body: JSON.stringify({
+        archive,
+        expectedDigest: preview.digest,
+        conflictStrategy: "duplicate",
+        importProfile: false,
+        confirmed: true,
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "IMPORT_DIGEST_MISMATCH" },
+    });
+    expect(
+      await env.DB.prepare("SELECT COUNT(*) AS count FROM subscriptions").first<number>("count"),
+    ).toBe(0);
+  });
+
   it("validates every imported subscription currency during preview", async () => {
     await api("/api/v1/session");
     const archive = archiveWithSubscriptions(1);
@@ -417,14 +592,14 @@ describe("OpenSubLists Worker API", () => {
     const response = await api("/api/v1/imports/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN },
-      body: JSON.stringify({ archive }),
+      body: JSON.stringify({ archive, conflictStrategy: "skip", importProfile: false }),
     });
     expect(response.status).toBe(422);
     const body = await response.json<{ error: { code: string } }>();
     expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("enforces resource caps for both CRUD and confirmed imports", async () => {
+  it("enforces resource caps for both CRUD and import previews", async () => {
     const sessionResponse = await api("/api/v1/session");
     const session = await sessionResponse.json<{ data: { user: { id: string } } }>();
     const userId = session.data.user.id;
@@ -452,19 +627,16 @@ describe("OpenSubLists Worker API", () => {
         },
       ],
     };
-    const preview = await post<{ digest: string }>("/api/v1/imports/preview", { archive });
-    const importResponse = await api("/api/v1/imports", {
+    const previewResponse = await api("/api/v1/imports/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN },
       body: JSON.stringify({
         archive,
-        expectedDigest: preview.digest,
         conflictStrategy: "skip",
         importProfile: false,
-        confirmed: true,
       }),
     });
-    expect(importResponse.status).toBe(409);
+    expect(previewResponse.status).toBe(409);
     const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM categories").first<number>(
       "count",
     );
@@ -493,7 +665,11 @@ describe("OpenSubLists Worker API", () => {
       ],
     };
     const repository = new D1OpenSubListsRepository(env.DB);
-    const preview = await new OpenSubListsService(repository).previewImport(userId, archive);
+    const preview = await new OpenSubListsService(repository).previewImport(userId, {
+      archive,
+      conflictStrategy: "skip",
+      importProfile: false,
+    });
     let raceInserted = false;
     class RacingRepository extends D1OpenSubListsRepository {
       override async getImportState(targetUserId: string) {
@@ -524,7 +700,7 @@ describe("OpenSubLists Worker API", () => {
     });
     await expect(
       new OpenSubListsService(racingRepository).importArchive(userId, request),
-    ).rejects.toMatchObject({ code: "CONFLICT", status: 409 });
+    ).rejects.toMatchObject({ code: "IMPORT_STATE_CHANGED", status: 409 });
     const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM categories").first<number>(
       "count",
     );
@@ -589,15 +765,23 @@ async function seedSubscriptions(
     .run();
 }
 
-function archiveWithSubscriptions(count: number) {
+function archiveWithSubscriptions(count: number): OpenSubListsArchiveV3 {
   const timestamp = new Date().toISOString();
   return {
     format: "opensublists",
-    schemaVersion: 2,
+    schemaVersion: 3,
     archiveId: crypto.randomUUID(),
     exportedAt: timestamp,
     generator: { name: "OpenSubLists", version: "integration-test" },
-    profile: { displayName: null, timezone: "UTC", reportingCurrency: "USD" },
+    profile: {
+      displayName: null,
+      timezone: "UTC",
+      reportingCurrency: "USD",
+      preferredLocale: "en",
+      defaultEmailReminderDaysBefore: 7,
+      emailReminderLocalTime: "09:00",
+      emailRemindersPaused: false,
+    },
     categories: [],
     paymentMethods: [],
     subscriptions: Array.from({ length: count }, (_, index) => ({
@@ -619,6 +803,8 @@ function archiveWithSubscriptions(count: number) {
       paymentMethodId: null,
       websiteUrl: null,
       notes: null,
+      emailReminderEnabled: false,
+      emailReminderDaysBefore: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     })),

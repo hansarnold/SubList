@@ -9,6 +9,7 @@ import type {
   PaymentMethodInput,
   Session,
   Subscription,
+  SubscriptionDetail,
   SubscriptionInput,
   UpdateUserInput,
   User,
@@ -132,7 +133,7 @@ export const api = {
 
   subscriptions: (searchParams?: URLSearchParams) =>
     request<Subscription[]>(`/subscriptions${searchParams?.size ? `?${searchParams}` : ""}`),
-  subscription: (id: string) => request<Subscription>(`/subscriptions/${id}`),
+  subscription: (id: string) => request<SubscriptionDetail>(`/subscriptions/${id}`),
   createSubscription: (input: SubscriptionInput) =>
     request<Subscription>("/subscriptions", { method: "POST", body: jsonBody(input) }),
   updateSubscription: (id: string, input: Partial<SubscriptionInput>) =>
@@ -144,10 +145,14 @@ export const api = {
   dashboard: (upcomingDays: 7 | 30) =>
     request<Dashboard>(`/dashboard?upcomingDays=${upcomingDays}`),
 
-  previewImport: (archive: unknown) =>
+  previewImport: (input: {
+    archive: unknown;
+    conflictStrategy: "skip" | "overwrite" | "duplicate";
+    importProfile: boolean;
+  }) =>
     request<ImportPreview>("/imports/preview", {
       method: "POST",
-      body: jsonBody({ archive }),
+      body: jsonBody(input),
     }),
   confirmImport: (input: {
     archive: unknown;

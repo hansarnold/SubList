@@ -19,3 +19,36 @@ export function notFound(resource: string): ApplicationError {
 export function conflict(message: string): ApplicationError {
   return new ApplicationError("CONFLICT", message, 409);
 }
+
+export class IdentityEmailConflictError extends ApplicationError {
+  constructor() {
+    super(
+      "IDENTITY_EMAIL_CONFLICT",
+      "The verified identity email is already linked to another account.",
+      409,
+    );
+    this.name = "IdentityEmailConflictError";
+  }
+}
+
+export class ImportStateChangedError extends ApplicationError {
+  constructor() {
+    super(
+      "IMPORT_STATE_CHANGED",
+      "Account data changed while the import was being applied. Run preview again.",
+      409,
+    );
+    this.name = "ImportStateChangedError";
+  }
+}
+
+export class SubscriptionStateChangedError extends ApplicationError {
+  constructor() {
+    super(
+      "SUBSCRIPTION_STATE_CHANGED",
+      "The subscription changed while this update was being applied. Reload and try again.",
+      409,
+    );
+    this.name = "SubscriptionStateChangedError";
+  }
+}

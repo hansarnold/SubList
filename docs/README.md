@@ -7,21 +7,26 @@ This directory is the authoritative product, implementation, and operations spec
 ## Reading Order
 
 1. [Product and Technical Plan](./plan.md) — Product scope, principles, roadmap, and current decisions.
-2. [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md) — Implemented cross-cutting behavior, implementation sequence, and reusable legacy operator cutover.
-3. [Architecture and Technology Decisions](./architecture.md) — Languages, tools, module boundaries, and dependency direction.
-4. [Data Model](./data-model.md) — D1 tables, constraints, tenant ownership, DDL, and extension paths.
-5. [Billing Rules](./billing-rules.md) — Deterministic recurrence, money normalization, FX conversion, rounding, and test matrix.
-6. [API Contract](./api-contract.md) — `/api/v1` resources, payloads, errors, actions, and security rules.
-7. [MVP UI Flow](./ui-flow.md) — Routes, responsive behavior, forms, lifecycle interactions, accessibility, and the selected Dashboard and Subscriptions visual references.
-8. [Import and Export](./import-export.md) — Current archive format, preview, conflicts, and native SubList migration.
-9. [Self-hosting](./self-hosting.md) — Fork-oriented Cloudflare resource provisioning, private configuration, and first deployment.
-10. [Environments and Deployment](./environments-and-deployment.md) — Local, preview, production, migrations, CI, deployment, and recovery.
-11. [Implementation Readiness Checklist](./pre-implementation-checklist.md) — Completed MVP and refactor gates plus remaining hosted-deployment inputs.
+2. [Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md) — Implemented direct preset creation, provider-gated renewal email, locally built public self-hosting site, and useful chart delivery; external publication and sender activation remain operator actions.
+3. [Reporting, Presets, and Symbols Refactor Plan](./reporting-presets-refactor-plan.md) — Implemented cross-cutting behavior, implementation sequence, and reusable legacy operator cutover.
+4. [Architecture and Technology Decisions](./architecture.md) — Languages, tools, module boundaries, and dependency direction.
+5. [Data Model](./data-model.md) — D1 tables, constraints, tenant ownership, DDL, and extension paths.
+6. [Billing Rules](./billing-rules.md) — Deterministic recurrence, money normalization, FX conversion, rounding, and test matrix.
+7. [API Contract](./api-contract.md) — `/api/v1` resources, payloads, errors, actions, and security rules.
+8. [MVP UI Flow](./ui-flow.md) — Routes, responsive behavior, forms, lifecycle interactions, accessibility, and the selected Dashboard and Subscriptions visual references.
+9. [Import and Export](./import-export.md) — Current archive format, preview, conflicts, and native SubList migration.
+10. [Self-hosting](./self-hosting.md) — Fork-oriented Cloudflare resource provisioning, private configuration, and first deployment.
+11. [Environments and Deployment](./environments-and-deployment.md) — Local, preview, production, migrations, CI, deployment, and recovery.
+12. [Implementation Readiness Checklist](./pre-implementation-checklist.md) — Completed MVP and refactor gates plus remaining hosted-deployment inputs.
 
 ## Authority Rules
 
 - A focused document is authoritative for its subject.
 - `plan.md` is a summary and roadmap. It must not redefine details owned by another document.
+- `subscription-editor-docs-and-charts-plan.md` owns the follow-up implementation
+  sequence for direct resource creation, per-subscription renewal email, the public
+  GitHub Pages site, and Dashboard chart delivery; focused documents still own their
+  final contracts.
 - `reporting-presets-refactor-plan.md` owns the cross-document implementation sequence, approved preset and icon catalogs, and reusable legacy v1-to-v2 operator cutover; focused documents still own their final contracts.
 - `data-model.md` owns persistence names and constraints.
 - `billing-rules.md` owns schedule and reporting semantics.
@@ -44,4 +49,5 @@ The following are future deployment or adapter inputs rather than unresolved MVP
 
 - Separate preview D1, hostname, and Access resources before preview releases are introduced.
 - A redacted native SubList JSON export fixture for the migration adapter.
-- A reminder provider if email reminders enter approved scope.
+- Private sender-domain and verified-destination configuration before a self-hoster
+  activates the implemented provider-gated renewal-email capability.

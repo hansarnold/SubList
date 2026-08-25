@@ -139,11 +139,16 @@ describe("refactored D1 repository", () => {
       ),
     ).toMatchObject({ symbol: { type: "emoji", value: "💳" } });
     expect(
-      await repository.updateSubscription(user.id, {
-        ...subscription,
-        symbol: { type: "icon", value: "subscriptions" },
-        updatedAt: 5,
-      }),
+      await repository.updateSubscription(
+        user.id,
+        {
+          ...subscription,
+          symbol: { type: "icon", value: "subscriptions" },
+          updatedAt: 5,
+        },
+        subscription.updatedAt,
+        subscription.emailReminderRevision,
+      ),
     ).toMatchObject({ symbol: { type: "icon", value: "subscriptions" } });
   });
 
@@ -168,10 +173,20 @@ describe("refactored D1 repository", () => {
 
     await repository.applyImport(
       user.id,
+      await importGuard(repository, user.id),
       importMutations("insert", category, paymentMethod, subscription),
-      { displayName: "Imported", timezone: "Asia/Shanghai", reportingCurrency: "CNY" },
+      {
+        displayName: "Imported",
+        timezone: "Asia/Shanghai",
+        reportingCurrency: "CNY",
+        preferredLocale: "en",
+        defaultEmailReminderDaysBefore: 7,
+        emailReminderLocalTime: "09:00",
+        emailRemindersPaused: false,
+      },
       [],
       10,
+      false,
     );
     expect(await repository.getUser(user.id)).toMatchObject({
       displayName: "Imported",
@@ -190,6 +205,7 @@ describe("refactored D1 repository", () => {
 
     await repository.applyImport(
       user.id,
+      await importGuard(repository, user.id),
       importMutations(
         "overwrite",
         { ...category, symbol: null },
@@ -199,6 +215,7 @@ describe("refactored D1 repository", () => {
       null,
       [],
       20,
+      false,
     );
     expect(await repository.getCategory(user.id, category.id)).toMatchObject({ symbol: null });
     expect(await repository.getPaymentMethod(user.id, paymentMethod.id)).toMatchObject({
@@ -325,6 +342,15 @@ async function runOrderedConcurrentFxWrites(first: FxSnapshot, second: FxSnapsho
   };
 }
 
+async function importGuard(repository: D1OpenSubListsRepository, userId: string) {
+  const [user, state] = await Promise.all([
+    repository.getUser(userId),
+    repository.getImportState(userId),
+  ]);
+  if (user === null) throw new Error("Import test user was not found.");
+  return { user, resourceRevision: state.resourceRevision };
+}
+
 function fxSnapshot(rateDate: string, fetchedAt: number, usdRate: string): FxSnapshot {
   return {
     provider: "ecb",
@@ -408,6 +434,9 @@ function subscriptionWrite(
     symbol,
     websiteUrl: null,
     notes: null,
+    emailReminderEnabled: false,
+    emailReminderDaysBefore: null,
+    emailReminderRevision: 0,
     createdAt: 1,
     updatedAt: 1,
   };

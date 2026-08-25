@@ -4,6 +4,7 @@ import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
+import { categoriesQueryKey } from "../../api/query-keys";
 import type { Category, Session } from "../../api/types";
 import { CategorySymbol } from "../../components/ResourceSymbol";
 import { Button, Field, InlineNotice } from "../../components/ui";
@@ -44,6 +45,7 @@ export function WelcomePage() {
   const queryClient = useQueryClient();
   const sessionQuery = useQuery({ queryKey: ["session"], queryFn: api.session });
   const session = sessionQuery.data;
+  const userId = session?.user.id ?? "pending";
   const initialLanguage: SupportedLanguage = i18n.language.startsWith("zh") ? "zh-Hans" : "en";
   const [language, setSelectedLanguage] = useState<SupportedLanguage>(initialLanguage);
   const [mode, setMode] = useState<OnboardingMode>("recommended");
@@ -65,6 +67,7 @@ export function WelcomePage() {
         displayName: input.displayName,
         timezone: input.timezone,
         reportingCurrency: input.reportingCurrency,
+        preferredLocale: input.language,
       });
 
       const existingCategories = await api.categories();
@@ -85,7 +88,7 @@ export function WelcomePage() {
       if (missing.length > 0) {
         const created = await api.createCategoriesBatch(missing);
         categories = [...existingCategories, ...created];
-        queryClient.setQueryData<Category[]>(["categories"], categories);
+        queryClient.setQueryData<Category[]>(categoriesQueryKey(userId), categories);
       }
 
       const user = await api.completeOnboarding();
@@ -93,14 +96,14 @@ export function WelcomePage() {
     },
     onSuccess: async ({ user, categories }) => {
       queryClient.setQueryData(["me"], user);
-      queryClient.setQueryData<Category[]>(["categories"], categories);
+      queryClient.setQueryData<Category[]>(categoriesQueryKey(user.id), categories);
       queryClient.setQueryData<Session | undefined>(["session"], (current) =>
         current ? { ...current, user } : current,
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["session"] }),
         queryClient.invalidateQueries({ queryKey: ["me"] }),
-        queryClient.invalidateQueries({ queryKey: ["categories"] }),
+        queryClient.invalidateQueries({ queryKey: categoriesQueryKey(user.id) }),
       ]);
       void navigate("/dashboard", { replace: true });
     },

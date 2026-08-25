@@ -70,6 +70,9 @@ export const paymentDisplayLabelSchema = z
 export const recurrenceUnitSchema = z.enum(["day", "week", "month", "year"]);
 export const anchorModeSchema = z.enum(["calendar_day", "end_of_month"]);
 export const statusSchema = z.enum(["active", "cancelled"]);
+export const reminderLocaleSchema = z.enum(["en", "zh-Hans"]);
+export const reminderDaysBeforeSchema = z.number().int().min(0).max(365);
+export const reminderLocalTimeSchema = z.string().regex(/^([01]\d|2[0-3]):00$/);
 export const resourceSymbolSchema = z.unknown().transform((value, context): ResourceSymbol => {
   try {
     return normalizeResourceSymbol(value);
@@ -105,6 +108,10 @@ export const updateUserSchema = z
     displayName: z.string().trim().min(1).max(120).nullable().optional(),
     timezone: timezoneSchema.optional(),
     reportingCurrency: currencySchema.optional(),
+    preferredLocale: reminderLocaleSchema.optional(),
+    defaultEmailReminderDaysBefore: reminderDaysBeforeSchema.optional(),
+    emailReminderLocalTime: reminderLocalTimeSchema.optional(),
+    emailRemindersPaused: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 
@@ -151,6 +158,8 @@ export const createSubscriptionSchema = z.strictObject({
   paymentMethodId: uuidSchema.nullable().default(null),
   websiteUrl: nullableUrlSchema.default(null),
   notes: z.string().max(10_000).nullable().default(null),
+  emailReminderEnabled: z.boolean().default(false),
+  emailReminderDaysBefore: reminderDaysBeforeSchema.nullable().default(null),
 });
 
 export const updateSubscriptionSchema = z
@@ -164,6 +173,8 @@ export const updateSubscriptionSchema = z
     paymentMethodId: uuidSchema.nullable().optional(),
     websiteUrl: nullableUrlSchema.optional(),
     notes: z.string().max(10_000).nullable().optional(),
+    emailReminderEnabled: z.boolean().optional(),
+    emailReminderDaysBefore: reminderDaysBeforeSchema.nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required.");
 
@@ -202,8 +213,16 @@ export const subscriptionArchiveSchema = z.strictObject({
   paymentMethodId: uuidSchema.nullable(),
   websiteUrl: nullableUrlSchema,
   notes: z.string().max(10_000).nullable(),
+  emailReminderEnabled: z.boolean(),
+  emailReminderDaysBefore: reminderDaysBeforeSchema.nullable(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema,
+});
+
+/** Offline migration input only. Runtime import routes use archiveV3Schema. */
+export const subscriptionArchiveV2Schema = subscriptionArchiveSchema.omit({
+  emailReminderEnabled: true,
+  emailReminderDaysBefore: true,
 });
 
 export const archiveV2Schema = z
@@ -223,14 +242,43 @@ export const archiveV2Schema = z
     }),
     categories: z.array(categoryArchiveSchema).max(100),
     paymentMethods: z.array(paymentMethodArchiveSchema).max(100),
+    subscriptions: z.array(subscriptionArchiveV2Schema).max(50),
+  })
+  .passthrough();
+
+export const archiveV3Schema = z
+  .object({
+    format: z.literal("opensublists"),
+    schemaVersion: z.literal(3),
+    archiveId: uuidSchema,
+    exportedAt: timestampSchema,
+    generator: z.strictObject({
+      name: z.literal("OpenSubLists"),
+      version: z.string().min(1).max(64),
+    }),
+    profile: z.strictObject({
+      displayName: z.string().max(120).nullable(),
+      timezone: timezoneSchema,
+      reportingCurrency: currencySchema,
+      preferredLocale: reminderLocaleSchema,
+      defaultEmailReminderDaysBefore: reminderDaysBeforeSchema,
+      emailReminderLocalTime: reminderLocalTimeSchema,
+      emailRemindersPaused: z.boolean(),
+    }),
+    categories: z.array(categoryArchiveSchema).max(100),
+    paymentMethods: z.array(paymentMethodArchiveSchema).max(100),
     subscriptions: z.array(subscriptionArchiveSchema).max(50),
   })
   .passthrough();
 
-export const importPreviewRequestSchema = z.strictObject({ archive: archiveV2Schema });
+export const importPreviewRequestSchema = z.strictObject({
+  archive: archiveV3Schema,
+  conflictStrategy: z.enum(["skip", "overwrite", "duplicate"]),
+  importProfile: z.boolean(),
+});
 
 export const importRequestSchema = z.strictObject({
-  archive: archiveV2Schema,
+  archive: archiveV3Schema,
   expectedDigest: z.string().regex(/^sha256-[a-f0-9]{64}$/),
   conflictStrategy: z.enum(["skip", "overwrite", "duplicate"]),
   importProfile: z.boolean(),
@@ -248,3 +296,4 @@ export type UpdatePaymentMethodInput = z.infer<typeof updatePaymentMethodSchema>
 export type CreateSubscriptionInput = z.infer<typeof createSubscriptionSchema>;
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
 export type ImportRequest = z.infer<typeof importRequestSchema>;
+export type ImportPreviewRequest = z.infer<typeof importPreviewRequestSchema>;

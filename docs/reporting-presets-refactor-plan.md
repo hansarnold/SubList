@@ -69,6 +69,12 @@ reordered, or deleted.
 Do not add a global preset table, `is_preset`, protected system rows, or preset
 provenance columns. A language change must not rename existing user content.
 
+The implemented Phase 4 follow-up exposes the same templates directly from
+subscription Create and Edit. It reuses the ordinary category and payment-method
+create APIs, then stores only the returned UUID on the subscription; it does not change this
+persistence decision. See
+[Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
+
 ### 2.4 Symbols Are Structured Data
 
 Emoji must not be embedded into resource names as a presentation convention. Category,
@@ -379,6 +385,8 @@ optional and must use the Dashboard snapshot.
 - Category presets may be selected as a batch and reviewed before creation.
 - Payment presets prefill name, kind, and symbol, then require Save.
 - Existing rows use the same editor regardless of how they were created.
+- Subscription Create and Edit reuse those compact editors so a preset or custom
+  resource can be explicitly saved and selected without leaving the form.
 
 ### 8.4 Symbol Picker
 

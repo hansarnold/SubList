@@ -334,6 +334,6 @@ export function Field({
 export function InlineNotice({
   children,
   tone = "info",
-}: PropsWithChildren<{ tone?: "info" | "danger" | "success" }>) {
+}: PropsWithChildren<{ tone?: "info" | "warning" | "danger" | "success" }>) {
   return <div className={clsx("inline-notice", `inline-notice--${tone}`)}>{children}</div>;
 }

@@ -24,6 +24,7 @@ import {
 import { authenticateRequest } from "../auth/access";
 import { D1OpenSubListsRepository } from "../db/repository";
 import { EcbExchangeRateProvider } from "../fx/ecb";
+import { resolveEmailReminderRuntime, type EmailReminderRuntime } from "../email/config";
 import { CRUD_BODY_LIMIT, IMPORT_BODY_LIMIT, parseJsonBody } from "./http";
 
 type Variables = {
@@ -42,8 +43,11 @@ export type RequestAuthenticator = (
   env: Env,
 ) => ReturnType<typeof authenticateRequest>;
 
+export type EmailReminderRuntimeResolver = (env: Env) => EmailReminderRuntime;
+
 export function createApp(
   authenticator: RequestAuthenticator = authenticateRequest,
+  emailRuntimeResolver: EmailReminderRuntimeResolver = resolveEmailReminderRuntime,
 ): Hono<AppHono> {
   const app = new Hono<AppHono>();
 
@@ -77,10 +81,15 @@ export function createApp(
     enforceSameOrigin(context.req.method, context.req.header("Origin"), context.env.PUBLIC_ORIGIN);
     const repository = new D1OpenSubListsRepository(context.env.DB);
     const exchangeRates = new ExchangeRateRefreshService(repository, new EcbExchangeRateProvider());
+    const emailRuntime = emailRuntimeResolver(context.env);
     const service = new OpenSubListsService(
       repository,
       Date.now,
       async () => (await exchangeRates.refresh()).snapshot,
+      {
+        emailRemindersAvailable: emailRuntime.available,
+        reminderStore: repository,
+      },
     );
     const identity = await authenticator(context.req.raw, context.env);
     context.set("service", service);
@@ -92,6 +101,9 @@ export function createApp(
     const data: Session = {
       user: toApiUser(context.get("user")),
       environment: applicationEnvironmentSchema.parse(context.env.ENVIRONMENT),
+      capabilities: {
+        emailReminders: emailRuntimeResolver(context.env).available,
+      },
     };
     return context.json({ data });
   });
@@ -271,7 +283,7 @@ export function createApp(
       assertSupportedArchiveVersion,
     );
     return context.json({
-      data: await service(context).previewImport(userId(context), input.archive),
+      data: await service(context).previewImport(userId(context), input),
     });
   });
 
@@ -405,7 +417,7 @@ function assertSupportedArchiveVersion(source: unknown): void {
     archive.format === "opensublists" &&
     typeof archive.schemaVersion === "number" &&
     Number.isInteger(archive.schemaVersion) &&
-    archive.schemaVersion !== 2
+    archive.schemaVersion !== 3
   ) {
     throw new ApplicationError(
       "UNSUPPORTED_ARCHIVE_VERSION",

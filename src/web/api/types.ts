@@ -20,7 +20,7 @@ export type {
   ImportPreview,
   ImportResult,
   ImportWarning,
-  OpenSubListsArchiveV2,
+  OpenSubListsArchiveV3,
   PaymentMethod,
   PaymentMethodBreakdown,
   PaymentMethodKind,
@@ -30,12 +30,24 @@ export type {
   ResourceSymbol,
   Session,
   Subscription,
+  SubscriptionDetail,
   SubscriptionStatus,
   UpcomingCharge,
   User,
 } from "../../shared/api-types";
 
-export type UpdateUserInput = Partial<Pick<User, "displayName" | "timezone" | "reportingCurrency">>;
+export type UpdateUserInput = Partial<
+  Pick<
+    User,
+    | "displayName"
+    | "timezone"
+    | "reportingCurrency"
+    | "preferredLocale"
+    | "defaultEmailReminderDaysBefore"
+    | "emailReminderLocalTime"
+    | "emailRemindersPaused"
+  >
+>;
 
 export type CategoryInput = Pick<Category, "name" | "color" | "symbol" | "position">;
 
@@ -54,4 +66,6 @@ export type SubscriptionInput = {
   paymentMethodId: Subscription["paymentMethodId"];
   websiteUrl: Subscription["websiteUrl"];
   notes: Subscription["notes"];
+  emailReminderEnabled: Subscription["emailReminderEnabled"];
+  emailReminderDaysBefore: Subscription["emailReminderDaysBefore"];
 };

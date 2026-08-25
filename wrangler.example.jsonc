@@ -30,6 +30,9 @@
     "PUBLIC_ORIGIN": "http://localhost:5173",
     "TEAM_DOMAIN": "local.invalid",
     "POLICY_AUD": "local-development",
+    "EMAIL_REMINDER_MODE": "disabled",
+    "EMAIL_REMINDER_FROM": "reminders@example.invalid",
+    "EMAIL_REMINDER_PROVIDER_CONFIG_REVISION": "0",
   },
   "d1_databases": [
     {
@@ -51,6 +54,9 @@
         "PUBLIC_ORIGIN": "https://preview.example.com",
         "TEAM_DOMAIN": "example.cloudflareaccess.com",
         "POLICY_AUD": "replace-with-preview-access-audience",
+        "EMAIL_REMINDER_MODE": "disabled",
+        "EMAIL_REMINDER_FROM": "reminders@example.invalid",
+        "EMAIL_REMINDER_PROVIDER_CONFIG_REVISION": "0",
       },
       "d1_databases": [
         {
@@ -66,7 +72,7 @@
       "workers_dev": false,
       "preview_urls": false,
       "triggers": {
-        "crons": ["15 18 * * *"],
+        "crons": ["15 18 * * *", "5 * * * *"],
       },
       "routes": [
         {
@@ -79,6 +85,9 @@
         "PUBLIC_ORIGIN": "https://sublist.example.com",
         "TEAM_DOMAIN": "example.cloudflareaccess.com",
         "POLICY_AUD": "replace-with-production-access-audience",
+        "EMAIL_REMINDER_MODE": "disabled",
+        "EMAIL_REMINDER_FROM": "reminders@example.invalid",
+        "EMAIL_REMINDER_PROVIDER_CONFIG_REVISION": "0",
       },
       "d1_databases": [
         {

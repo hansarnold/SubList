@@ -6,11 +6,16 @@ import {
 } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, inject, it, vi } from "vitest";
 import type { ExchangeRateProvider } from "../../src/application/fx-service";
-import worker, { createWorker } from "../../src/worker";
+import type { SubscriptionWrite } from "../../src/application/ports";
+import * as workerEntry from "../../src/worker";
+import { createWorker, FX_REFRESH_CRON, RENEWAL_REMINDER_CRON } from "../../src/worker/runtime";
 import { createApp } from "../../src/worker/api/app";
+import { D1OpenSubListsRepository } from "../../src/worker/db/repository";
+import { FakeEmailSender } from "../../src/worker/email/fake";
 
 const migrations = inject("migrations");
 const ORIGIN = "http://localhost:5173";
+const worker = workerEntry.default;
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, migrations);
@@ -22,6 +27,12 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM fx_rates"),
     env.DB.prepare("DELETE FROM fx_snapshot"),
   ]);
+});
+
+describe("Worker module entry", () => {
+  it("exports only the default Worker handler", () => {
+    expect(Object.keys(workerEntry)).toEqual(["default"]);
+  });
 });
 
 describe("refactor Worker routes", () => {
@@ -238,6 +249,124 @@ describe("scheduled exchange-rate refresh", () => {
   });
 });
 
+describe("scheduled renewal reminders", () => {
+  it("dispatches only the exact reminder Cron and drains the fake sender", async () => {
+    const scheduledTime = Date.parse("2026-08-24T10:05:00.000Z");
+    const repository = new D1OpenSubListsRepository(env.DB);
+    const user = await repository.resolveUser(
+      {
+        provider: "local_development",
+        subject: "runtime-reminder",
+        email: "runtime-reminder@example.test",
+      },
+      scheduledTime,
+    );
+    await repository.createSubscription(user.id, reminderSubscription());
+    const sender = new FakeEmailSender();
+    const providerFactory = vi.fn(() => fixedProvider("2026-08-24"));
+    const resolveEmailRuntime = vi.fn(() => ({
+      available: true as const,
+      kind: "fake" as const,
+      configuration: {
+        providerKey: "deterministic_fake",
+        providerConfigRevision: 1,
+        templateVersion: 1,
+        appBaseUrl: ORIGIN,
+      },
+    }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const scheduledWorker = createWorker(providerFactory, {
+      resolveEmailRuntime,
+      createEmailSender: () => sender,
+      now: () => scheduledTime,
+    });
+
+    try {
+      await scheduledWorker.scheduled(
+        createScheduledController({ cron: RENEWAL_REMINDER_CRON, scheduledTime }),
+        env,
+      );
+      expect(sender.sent).toHaveLength(1);
+      expect(providerFactory).not.toHaveBeenCalled();
+      expect(resolveEmailRuntime).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('"message":"renewal_reminder_dispatch_complete"'),
+      );
+      expect(
+        await env.DB.prepare("SELECT COUNT(*) FROM fx_snapshot").first<number>("COUNT(*)"),
+      ).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("skips an unavailable sender without scanning or creating delivery rows", async () => {
+    const scheduledTime = Date.parse("2026-08-24T10:05:00.000Z");
+    const createEmailSender = vi.fn(() => new FakeEmailSender());
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const scheduledWorker = createWorker(() => fixedProvider("2026-08-24"), {
+      resolveEmailRuntime: () => ({ available: false }),
+      createEmailSender,
+      now: () => scheduledTime,
+    });
+
+    try {
+      await scheduledWorker.scheduled(
+        createScheduledController({ cron: RENEWAL_REMINDER_CRON, scheduledTime }),
+        env,
+      );
+      expect(createEmailSender).not.toHaveBeenCalled();
+      expect(
+        await env.DB.prepare("SELECT COUNT(*) FROM renewal_email_deliveries").first<number>(
+          "COUNT(*)",
+        ),
+      ).toBe(0);
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('"message":"renewal_reminder_dispatch_skipped"'),
+      );
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("keeps FX and unknown Cron dispatch independent from reminder resolution", async () => {
+    const scheduledTime = Date.parse("2026-08-24T18:15:00.000Z");
+    const resolveEmailRuntime = vi.fn(() => ({ available: false as const }));
+    const createEmailSender = vi.fn(() => new FakeEmailSender());
+    const providerFactory = vi.fn(() => fixedProvider("2026-08-24"));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const scheduledWorker = createWorker(providerFactory, {
+      resolveEmailRuntime,
+      createEmailSender,
+      now: () => scheduledTime,
+    });
+
+    try {
+      await scheduledWorker.scheduled(
+        createScheduledController({ cron: FX_REFRESH_CRON, scheduledTime }),
+        env,
+      );
+      expect(providerFactory).toHaveBeenCalledTimes(1);
+      expect(resolveEmailRuntime).not.toHaveBeenCalled();
+
+      await scheduledWorker.scheduled(
+        createScheduledController({ cron: "0 0 1 1 *", scheduledTime }),
+        env,
+      );
+      expect(providerFactory).toHaveBeenCalledTimes(1);
+      expect(resolveEmailRuntime).not.toHaveBeenCalled();
+      expect(createEmailSender).not.toHaveBeenCalled();
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining('"message":"scheduled_trigger_ignored"'),
+      );
+    } finally {
+      warning.mockRestore();
+      log.mockRestore();
+    }
+  });
+});
+
 function fixedProvider(rateDate: string): ExchangeRateProvider {
   return {
     fetchLatest() {
@@ -252,6 +381,35 @@ function fixedProvider(rateDate: string): ExchangeRateProvider {
         ],
       });
     },
+  };
+}
+
+function reminderSubscription(): SubscriptionWrite {
+  return {
+    id: "20000000-0000-4000-8000-000000000099",
+    name: "Runtime reminder",
+    amountMicros: 9_990_000,
+    currency: "USD",
+    recurrence: {
+      unit: "day",
+      count: 1,
+      anchorOn: "2026-01-01",
+      anchorMode: "calendar_day",
+    },
+    nextBillingOn: "2026-08-24",
+    status: "active",
+    cancelledAt: null,
+    archivedAt: null,
+    categoryId: null,
+    paymentMethodId: null,
+    symbol: null,
+    websiteUrl: null,
+    notes: null,
+    emailReminderEnabled: true,
+    emailReminderDaysBefore: null,
+    emailReminderRevision: 0,
+    createdAt: 1,
+    updatedAt: 1,
   };
 }
 

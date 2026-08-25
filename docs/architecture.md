@@ -1,7 +1,9 @@
 # OpenSubLists Architecture and Technology Decisions
 
-> Status: Implemented baseline with approved reporting refactor
-> Last updated: 2026-08-23  
+> Status: Implemented baseline, reporting refactor, and provider-gated renewal email
+>
+> Last updated: 2026-08-24
+>
 > Deployment target: Cloudflare Workers and D1
 
 ## 1. System Shape
@@ -19,10 +21,11 @@ Full-stack Worker
    ├── Access JWT middleware
    ├── Application services
    ├── D1 repositories
-   └── Scheduled ECB rate-refresh handler
+   ├── Scheduled ECB rate-refresh handler
+   └── Hourly renewal-email handler
              │
-             ▼
-             D1
+             ├──> D1 preferences and delivery outbox
+             └──> EmailSender provider port
 ```
 
 The MVP is one deployable Worker plus one D1 database per environment. Worker count is not an architectural goal. Background work remains in the same Worker until an operational reason justifies splitting it.
@@ -100,7 +103,8 @@ http/api ──> application ──> domain
               infrastructure
               ├── d1
               ├── access
-              └── logging
+              ├── logging
+              └── email provider
 ```
 
 Rules:
@@ -205,11 +209,57 @@ Owns original-currency grouping, exact FX conversion, reporting-currency aggrega
 
 Authentication verification is infrastructure. Stable user resolution and external-identity linking are application behavior backed by repositories.
 
+### 7.5 Renewal Email — Implemented and Provider-gated
+
+`RenewalReminderService` owns recurrence-based selection and orchestration through two
+narrow ports: `ReminderStore` and `EmailSender`. The D1 implementation provides
+cross-tenant scheduled scans, atomic claims, retries, and one delivery key per billing
+occurrence. The provider adapter transports already-rendered text and HTML and
+classifies failures without owning recurrence or tenant rules.
+
+The authenticated detail read composes a separate `SubscriptionDetail` response from
+the tenant-scoped subscription plus a provider-neutral reminder summary. Subscription
+lists and ordinary write responses retain the base `Subscription` type and do not join
+the operational delivery ledger.
+
+The existing Worker runs a separate hourly Cron expression and dispatches scheduled
+jobs by `controller.cron`, keeping reminder and FX failures independent. D1 is the
+initial durable outbox; a Queue is not required at the personal 50-subscription account
+limit. If later adopted, Queue messages contain only a delivery ID and the D1 ledger
+remains authoritative because queue delivery is at least once.
+
+Local and CI inject a fake `EmailSender` and never contact a mailbox. Production first
+uses the native Cloudflare `send_email` binding with verified destinations. Provider
+configuration is optional, and its absence becomes a non-secret runtime capability
+rather than a startup failure for the core application.
+
+The import application service receives that non-secret capability explicitly for the
+reminder-capable archive version. Preview computes structured reminder impact for the
+selected merge options; confirmation recomputes the actual merged enabled count and
+forces the user pause in the same D1 transaction when no sender is available. This
+safeguard is independent of whether profile preferences are otherwise imported.
+
+The D1 uniqueness key guarantees one logical delivery row, not exactly-once physical
+email. The native binding currently exposes no documented idempotency input, so an
+ambiguous result becomes terminal `unknown` and is not automatically retried. The
+service retries only a provider result that proves non-acceptance. A future adapter
+with provider idempotency may resolve and retry an ambiguous transport event inside
+the adapter before returning; any `ambiguous` outcome reported to the service remains
+terminal without changing the planner or ledger.
+
+The native adapter classifies an undocumented exception, timeout, or expired send
+lease as ambiguous. It must not infer non-acceptance from a transport error alone, and
+may have no retryable outcome until the provider offers positive proof of
+non-acceptance.
+
 ## 8. Configuration
 
 Worker environment bindings are represented by a generated `Env` type. Runtime types are regenerated from `wrangler.example.jsonc` with non-literal variable types whenever binding configuration changes. Operator-owned values live only in the ignored `wrangler.local.jsonc` file.
 
 Configuration is validated once per isolate or request initialization path and exposed as a typed object. Missing production authentication settings fail closed.
+Missing email configuration disables only the email capability. Real sender
+domains, recipient restrictions, and any external provider secret stay in ignored
+operator configuration or encrypted Worker secrets.
 
 No environment binding is read directly from domain modules.
 
@@ -249,7 +299,7 @@ Revisit these decisions only with concrete evidence:
 | ----------------- | ------------------------------------------------------------------------ |
 | One Worker        | Background work affects latency, permissions, or deployment isolation    |
 | No ORM            | Mapping or migration boilerplate becomes a measured maintenance problem  |
-| No Queue          | Delivery volume or retry requirements exceed direct scheduled work       |
+| No Queue          | D1 outbox backlog, retry latency, or execution limits require a consumer |
 | No R2             | User-uploaded images become an approved feature                          |
 | User as tenant    | Shared subscriptions or family accounts become an approved feature       |
 | No API pagination | An account needs more than the documented 50-subscription personal limit |
@@ -264,4 +314,6 @@ Revisit these decisions only with concrete evidence:
 - [D1 SQL API](https://developers.cloudflare.com/d1/sql-api/)
 - [D1 Workers Binding API](https://developers.cloudflare.com/d1/worker-api/)
 - [Cloudflare Workers Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+- [Cloudflare Workers email API](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/)
+- [Cloudflare Queues delivery guarantees](https://developers.cloudflare.com/queues/reference/how-queues-works/)
 - [ECB Data API](https://data.ecb.europa.eu/help/api/data)

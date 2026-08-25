@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import {
   IconArchive,
   IconArrowLeft,
+  IconBell,
   IconCalendarEvent,
   IconEdit,
   IconExternalLink,
@@ -13,6 +14,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, api } from "../../api/client";
+import { categoriesQueryKey, paymentMethodsQueryKey, sessionQueryKey } from "../../api/query-keys";
 import { PaymentMethodSymbol } from "../../components/ResourceSymbol";
 import {
   Button,
@@ -33,6 +35,7 @@ import {
   paymentMethodFor,
   previewOccurrences,
 } from "../../utils/format";
+import { addCalendarDays } from "../../../domain/calendar-date";
 
 type ConfirmAction = "cancel" | "reactivate" | "delete" | null;
 
@@ -41,6 +44,8 @@ export function SubscriptionDetailPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const sessionQuery = useQuery({ queryKey: sessionQueryKey, queryFn: api.session });
+  const userId = sessionQuery.data?.user.id ?? "pending";
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -50,17 +55,25 @@ export function SubscriptionDetailPage() {
   });
   const [categoriesQuery, paymentMethodsQuery] = useQueries({
     queries: [
-      { queryKey: ["categories"], queryFn: api.categories },
-      { queryKey: ["payment-methods"], queryFn: api.paymentMethods },
+      {
+        queryKey: categoriesQueryKey(userId),
+        queryFn: api.categories,
+        enabled: userId !== "pending",
+      },
+      {
+        queryKey: paymentMethodsQueryKey(userId),
+        queryFn: api.paymentMethods,
+        enabled: userId !== "pending",
+      },
     ],
   });
 
   const actionMutation = useMutation({
     mutationFn: (action: "cancel" | "reactivate" | "archive" | "unarchive") =>
       api.subscriptionAction(subscriptionId, action),
-    onSuccess: async (updated, action) => {
-      queryClient.setQueryData(["subscription", subscriptionId], updated);
+    onSuccess: async (_updated, action) => {
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["subscription", subscriptionId] }),
         queryClient.invalidateQueries({ queryKey: ["subscriptions"] }),
         queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
       ]);
@@ -92,7 +105,12 @@ export function SubscriptionDetailPage() {
     [subscriptionQuery.data],
   );
 
-  if (subscriptionQuery.isPending || categoriesQuery.isPending || paymentMethodsQuery.isPending) {
+  if (
+    sessionQuery.isPending ||
+    subscriptionQuery.isPending ||
+    categoriesQuery.isPending ||
+    paymentMethodsQuery.isPending
+  ) {
     return <LoadingPage variant="form" />;
   }
   if (subscriptionQuery.isError) {
@@ -116,18 +134,32 @@ export function SubscriptionDetailPage() {
       />
     );
   }
-  const supportingError = categoriesQuery.error ?? paymentMethodsQuery.error;
+  const supportingError = sessionQuery.error ?? categoriesQuery.error ?? paymentMethodsQuery.error;
   if (supportingError) {
     return <QueryError error={supportingError} />;
   }
+  const session = sessionQuery.data;
+  if (!session) {
+    return <LoadingPage variant="form" />;
+  }
 
   const subscription = subscriptionQuery.data;
+  const account = session.user;
   const category = categoryFor(subscription, categoriesQuery.data ?? []);
   const paymentMethod = paymentMethodFor(subscription, paymentMethodsQuery.data ?? []);
   const mutationError = actionMutation.error ?? deleteMutation.error;
   const recurrence = t(`subscriptions.interval.${subscription.recurrence.unit}`, {
     count: subscription.recurrence.count,
   });
+  const effectiveReminderDaysBefore =
+    subscription.emailReminderDaysBefore ?? account.defaultEmailReminderDaysBefore;
+  const delivery = subscription.emailReminderDelivery;
+  const plannedReminderOn =
+    subscription.emailReminderEnabled &&
+    delivery.occurrenceOn !== null &&
+    ["scheduled", "paused", "retrying"].includes(delivery.state)
+      ? addCalendarDays(delivery.occurrenceOn, -effectiveReminderDaysBefore)
+      : null;
 
   const dialog =
     confirmAction === "cancel"
@@ -288,6 +320,85 @@ export function SubscriptionDetailPage() {
             <dd className="detail-notes">{subscription.notes ?? t("app.notAvailable")}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="surface detail-section reminder-detail">
+        <div className="reminder-detail__heading">
+          <span>
+            <IconBell size={20} aria-hidden="true" />
+            <h2>{t("detail.renewalEmail")}</h2>
+          </span>
+          <span
+            className={`reminder-status reminder-status--${
+              subscription.emailReminderEnabled ? delivery.state : "none"
+            }`}
+          >
+            {subscription.emailReminderEnabled
+              ? t(`detail.reminderStates.${delivery.state}`)
+              : t("detail.reminderOff")}
+          </span>
+        </div>
+        {!subscription.emailReminderEnabled ? (
+          <div className="reminder-detail__empty">
+            <p>{t("detail.reminderOffHelp")}</p>
+            <Link
+              className="button button--secondary"
+              to={`/subscriptions/${subscription.id}/edit`}
+            >
+              {t("detail.configureReminder")}
+            </Link>
+          </div>
+        ) : (
+          <>
+            {!session.capabilities.emailReminders ? (
+              <InlineNotice tone="warning">{t("detail.reminderUnavailable")}</InlineNotice>
+            ) : account.emailReminderSystemSuspended ? (
+              <InlineNotice tone="danger">{t("detail.reminderSystemSuspended")}</InlineNotice>
+            ) : account.emailRemindersPaused ? (
+              <InlineNotice tone="warning">{t("detail.remindersPaused")}</InlineNotice>
+            ) : null}
+            <dl className="detail-list reminder-detail__list">
+              <div>
+                <dt>{t("detail.reminderRecipient")}</dt>
+                <dd>{account.email}</dd>
+              </div>
+              <div>
+                <dt>{t("detail.reminderLead")}</dt>
+                <dd>
+                  {t("detail.reminderDaysBefore", { count: effectiveReminderDaysBefore })}
+                  {subscription.emailReminderDaysBefore === null
+                    ? ` · ${t("detail.inheritsAccountDefault")}`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("detail.plannedReminder")}</dt>
+                <dd>
+                  {plannedReminderOn
+                    ? t("detail.plannedReminderValue", {
+                        date: formatDate(plannedReminderOn, i18n.language),
+                        time: account.emailReminderLocalTime,
+                        timeZone: account.timezone,
+                      })
+                    : t("app.notAvailable")}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("detail.reminderOccurrence")}</dt>
+                <dd>{formatDate(delivery.occurrenceOn, i18n.language) ?? t("app.notAvailable")}</dd>
+              </div>
+              <div>
+                <dt>{t("detail.lastReminderAttempt")}</dt>
+                <dd>
+                  {delivery.lastAttemptAt
+                    ? formatTimestamp(delivery.lastAttemptAt, i18n.language)
+                    : t("app.notAvailable")}
+                </dd>
+              </div>
+            </dl>
+            <p className="reminder-detail__disclaimer">{t("detail.reminderDisclaimer")}</p>
+          </>
+        )}
       </section>
 
       <section className="surface detail-section detail-actions">

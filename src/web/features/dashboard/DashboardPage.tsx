@@ -12,13 +12,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { api } from "../../api/client";
-import type {
-  Dashboard,
-  PaymentMethodBreakdown,
-  ReportingEstimate,
-  UpcomingCharge,
-} from "../../api/types";
-import { PaymentMethodSymbol, SymbolGlyph } from "../../components/ResourceSymbol";
+import type { Dashboard, ReportingEstimate, UpcomingCharge } from "../../api/types";
+import { CategorySymbol, PaymentMethodSymbol } from "../../components/ResourceSymbol";
 import {
   CategoryPill,
   InlineNotice,
@@ -28,6 +23,7 @@ import {
   ServiceMark,
 } from "../../components/ui";
 import { currencySymbol, formatDate, formatMoney } from "../../utils/format";
+import { BreakdownCard } from "./BreakdownCard";
 
 function groupCharges(charges: UpcomingCharge[]) {
   return charges.reduce<Map<string, UpcomingCharge[]>>((groups, charge) => {
@@ -307,79 +303,6 @@ function OriginalCurrencyEstimates({ data, locale }: { data: Dashboard; locale: 
   );
 }
 
-function CategoryBreakdown({ data, locale }: { data: Dashboard; locale: string }) {
-  const { t } = useTranslation();
-  const largest = Math.max(...data.categoryBreakdown.map((item) => item.subscriptionCount), 1);
-  const total = data.categoryBreakdown.reduce((sum, item) => sum + item.subscriptionCount, 0);
-  return (
-    <section className="surface category-breakdown">
-      <h2>{t("dashboard.categoryBreakdown")}</h2>
-      <div className="category-breakdown__items">
-        {data.categoryBreakdown.map((item) => (
-          <div className="category-breakdown__item" key={item.categoryId ?? "uncategorized"}>
-            <div>
-              <span className="breakdown-label">
-                {item.categoryName ? (
-                  <CategoryPill
-                    name={item.categoryName}
-                    color={item.categoryColor ?? "#7c8798"}
-                    symbol={item.categorySymbol}
-                  />
-                ) : (
-                  t("dashboard.uncategorized")
-                )}
-              </span>
-              <span className="breakdown-value">
-                {item.reportingMonthlyAverage === null
-                  ? item.subscriptionCount
-                  : formatMoney(item.reportingMonthlyAverage, data.reporting.currency, locale)}
-              </span>
-            </div>
-            <progress
-              max={largest}
-              value={item.subscriptionCount}
-              style={{ "--progress-color": item.categoryColor ?? "#7c8798" } as React.CSSProperties}
-              aria-label={`${item.categoryName ?? t("dashboard.uncategorized")}: ${item.subscriptionCount}`}
-            />
-          </div>
-        ))}
-      </div>
-      <p className="surface__footnote">{t("dashboard.subscriptions", { count: total })}</p>
-    </section>
-  );
-}
-
-function PaymentBreakdownSymbol({ item }: { item: PaymentMethodBreakdown }) {
-  if (item.paymentMethodSymbol) {
-    return <SymbolGlyph symbol={item.paymentMethodSymbol} size={20} />;
-  }
-  return <PaymentMethodSymbol symbol={null} kind={item.paymentMethodKind ?? "other"} size={20} />;
-}
-
-function PaymentMethodBreakdownView({ data, locale }: { data: Dashboard; locale: string }) {
-  const { t } = useTranslation();
-  return (
-    <section className="surface payment-breakdown">
-      <h2>{t("dashboard.paymentMethodBreakdown")}</h2>
-      <div className="payment-breakdown__items">
-        {data.paymentMethodBreakdown.map((item) => (
-          <div className="payment-breakdown__item" key={item.paymentMethodId ?? "none"}>
-            <span className="breakdown-label">
-              <PaymentBreakdownSymbol item={item} />
-              {item.paymentMethodName ?? t("dashboard.noPaymentMethod")}
-            </span>
-            <span className="breakdown-value">
-              {item.reportingMonthlyAverage === null
-                ? item.subscriptionCount
-                : formatMoney(item.reportingMonthlyAverage, data.reporting.currency, locale)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 export function DashboardPage() {
   const { t, i18n } = useTranslation();
   const [days, setDays] = useState<7 | 30>(30);
@@ -430,8 +353,60 @@ export function DashboardPage() {
           <UpcomingAgenda data={data} locale={i18n.language} days={days} setDays={setDays} />
           <OriginalCurrencyEstimates data={data} locale={i18n.language} />
           <div className="breakdown-grid">
-            <CategoryBreakdown data={data} locale={i18n.language} />
-            <PaymentMethodBreakdownView data={data} locale={i18n.language} />
+            <BreakdownCard
+              title={t("dashboard.categoryBreakdown")}
+              storageKey="opensublists-category-breakdown-view"
+              currency={data.reporting.currency}
+              fx={data.reporting.fx}
+              locale={i18n.language}
+              items={data.categoryBreakdown.map((item) => ({
+                key: item.categoryId ?? "__uncategorized__",
+                label: item.categoryName ?? t("dashboard.uncategorized"),
+                color: item.categoryColor,
+                subscriptionCount: item.subscriptionCount,
+                reportingMonthlyAverage: item.reportingMonthlyAverage,
+                totalsByCurrency: item.totalsByCurrency,
+              }))}
+              renderSymbol={(row) => {
+                const item = data.categoryBreakdown.find(
+                  (candidate) => (candidate.categoryId ?? "__uncategorized__") === row.key,
+                );
+                return (
+                  <CategorySymbol
+                    symbol={item?.categorySymbol ?? null}
+                    color={item?.categoryColor ?? "#7c8798"}
+                    size={21}
+                  />
+                );
+              }}
+            />
+            <BreakdownCard
+              title={t("dashboard.paymentMethodBreakdown")}
+              storageKey="opensublists-payment-breakdown-view"
+              currency={data.reporting.currency}
+              fx={data.reporting.fx}
+              locale={i18n.language}
+              items={data.paymentMethodBreakdown.map((item) => ({
+                key: item.paymentMethodId ?? "__none__",
+                label: item.paymentMethodName ?? t("dashboard.noPaymentMethod"),
+                color: null,
+                subscriptionCount: item.subscriptionCount,
+                reportingMonthlyAverage: item.reportingMonthlyAverage,
+                totalsByCurrency: item.totalsByCurrency,
+              }))}
+              renderSymbol={(row) => {
+                const item = data.paymentMethodBreakdown.find(
+                  (candidate) => (candidate.paymentMethodId ?? "__none__") === row.key,
+                );
+                return (
+                  <PaymentMethodSymbol
+                    symbol={item?.paymentMethodSymbol ?? null}
+                    kind={item?.paymentMethodKind ?? "other"}
+                    size={21}
+                  />
+                );
+              }}
+            />
           </div>
         </>
       )}

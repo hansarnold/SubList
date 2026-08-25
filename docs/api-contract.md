@@ -1,6 +1,6 @@
 # OpenSubLists API Contract
 
-> Status: Implemented baseline with approved refactor target
+> Status: Implemented baseline, reporting refactor, and provider-gated renewal email
 > Last updated: 2026-08-24
 > Base path: `/api/v1`  
 > Format: JSON over same-origin HTTPS
@@ -37,6 +37,14 @@ type AuthContext = {
 ```
 
 This context is server-side only.
+
+For a known identity, a changed verified Access email
+refreshes both the identity and
+`users.primary_email` transactionally when the normalized address is unowned or belongs
+to the same user. A collision with another user fails account resolution with
+`409 IDENTITY_EMAIL_CONFLICT`, preserves both accounts, and sets a system-owned
+reminder suspension for the known user until an operator resolves the identity
+conflict.
 
 ## 3. HTTP and Security Rules
 
@@ -103,6 +111,11 @@ Common codes:
 | 401  | `UNAUTHENTICATED`             | Missing, expired, or invalid Access token           |
 | 404  | `NOT_FOUND`                   | Resource absent or not owned by current user        |
 | 409  | `CONFLICT`                    | Unique-name or state-transition conflict            |
+| 409  | `IDENTITY_EMAIL_CONFLICT`     | Verified email already belongs to a different user  |
+| 409  | `EMAIL_REMINDERS_UNAVAILABLE` | Deployment has no enabled sender capability         |
+| 409  | `EMAIL_REMINDERS_SUSPENDED`   | System safety suspension requires operator action   |
+| 409  | `IMPORT_STATE_CHANGED`        | Account data changed; run import preview again      |
+| 409  | `SUBSCRIPTION_STATE_CHANGED`  | Subscription changed; reload before retrying        |
 | 413  | `PAYLOAD_TOO_LARGE`           | Request exceeds configured limit                    |
 | 422  | `VALIDATION_ERROR`            | Structurally valid JSON with invalid fields         |
 | 422  | `UNSUPPORTED_ARCHIVE_VERSION` | Archive schema is not the current supported version |
@@ -170,6 +183,11 @@ type User = {
   timezone: string;
   reportingCurrency: string;
   onboardingCompletedAt: string | null;
+  preferredLocale: "en" | "zh-Hans";
+  defaultEmailReminderDaysBefore: number;
+  emailReminderLocalTime: string;
+  emailRemindersPaused: boolean;
+  emailReminderSystemSuspended: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -241,12 +259,114 @@ type Subscription = {
   symbol: ResourceSymbol;
   websiteUrl: string | null;
   notes: string | null;
+  emailReminderEnabled: boolean;
+  emailReminderDaysBefore: number | null;
   createdAt: string;
   updatedAt: string;
 };
 ```
 
 `nextBillingOn`, `status`, `cancelledAt`, and `archivedAt` are controlled through server rules and lifecycle actions rather than directly on create.
+
+## 7.6 Renewal-email Additions — Implemented and Provider-gated
+
+`User` includes:
+
+```ts
+type RenewalEmailUserPreference = {
+  preferredLocale: "en" | "zh-Hans";
+  defaultEmailReminderDaysBefore: number;
+  emailReminderLocalTime: string;
+  emailRemindersPaused: boolean;
+};
+
+type RenewalEmailUserState = {
+  emailReminderSystemSuspended: boolean;
+};
+```
+
+`defaultEmailReminderDaysBefore` is an integer in `0..365`, and
+`emailReminderLocalTime` is initially restricted to a whole-hour local value matching
+`^([01]\d|2[0-3]):00$`. The account default never enables a subscription.
+`emailReminderSystemSuspended` is read-only and exposes only the presence of an
+operator-resolved safety suspension, not its internal reason.
+
+`Subscription` gains:
+
+```ts
+type RenewalEmailSubscriptionPreference = {
+  emailReminderEnabled: boolean;
+  emailReminderDaysBefore: number | null;
+};
+```
+
+`null` means inherit the account default. It never means disabled. New and legacy
+subscriptions default to `false` and `null`.
+
+`Session` also gains a non-secret deployment capability:
+
+```ts
+type SessionCapabilities = {
+  emailReminders: boolean;
+};
+```
+
+The capability reports whether the deployment has an enabled sender path. It does not
+expose provider, sender-domain, recipient-verification, or secret details.
+
+`PATCH /api/v1/me` accepts the four editable account preference fields, never
+`emailReminderSystemSuspended`. Setting `emailRemindersPaused: false` while the sender
+capability is unavailable returns `409 EMAIL_REMINDERS_UNAVAILABLE`; doing so while a
+system suspension exists returns `409 EMAIL_REMINDERS_SUSPENDED`.
+
+Subscription create and patch accept the two subscription fields, preserving the
+distinction between omitted, `null`, and `false`. Capability gating applies to create
+with `emailReminderEnabled: true` and to the stored transition `false -> true`, not to
+an already-enabled record whose complete edit payload still contains `true`. Disabling
+an existing preference always remains allowed.
+
+Subscription Detail also returns a coarse, read-only summary:
+
+```ts
+type RenewalEmailDeliverySummary = {
+  state: "none" | "scheduled" | "paused" | "retrying" | "sent" | "failed" | "unknown" | "expired";
+  occurrenceOn: string | null;
+  lastAttemptAt: string | null;
+};
+
+type SubscriptionDetail = Subscription & {
+  emailReminderDelivery: RenewalEmailDeliverySummary;
+};
+```
+
+The summary is provider-neutral and never includes an address, provider name, message
+ID, or raw error. No full delivery-history endpoint is planned for the first release.
+The hourly scheduled service uses internal cross-tenant repository authority, never an
+HTTP route or a client-supplied `userId`.
+
+Summary derivation is deterministic:
+
+1. An opted-out, cancelled, or archived subscription returns `none`.
+2. A row for today's local reminder window takes precedence over every later
+   projection. Terminal states map by name; an attempted internal `cancelled` row
+   maps to coarse `failed`, while an unattempted superseded row is ignored. An expired
+   `sending` lease derives `unknown`. For non-terminal work,
+   effective account/deployment suppression maps to `paused`, otherwise `pending` or an
+   active `sending` lease maps to `scheduled` and `retry_wait` maps to `retrying`.
+3. Without a current-window row, an opted-in subscription under user pause, system
+   suspension, or unavailable sender returns `paused` for its next projected
+   occurrence.
+4. Otherwise, derive the earliest authoritative occurrence whose calculated local
+   reminder window is current or future. A terminal or attempted delivery already
+   locked to that billing occurrence remains visible instead of being projected as a
+   second email; otherwise the state is `scheduled` even before its due-day outbox row
+   exists. Do not substitute the inclusive `nextBillingOn`; for a short recurrence and
+   a long lead time, the relevant reminder may belong to a later billing occurrence.
+5. If there is no future eligible occurrence, return the most recent non-cancelled
+   terminal state; with no such row, return `none` and null dates.
+
+This precedence ensures a future daily projection cannot hide a failure or unknown
+result from today's reminder window.
 
 ## 8. User Endpoints
 
@@ -258,6 +378,7 @@ Returns the authenticated application user and the non-secret runtime environmen
 type Session = {
   user: User;
   environment: "local" | "preview" | "production";
+  capabilities: SessionCapabilities;
 };
 ```
 
@@ -397,7 +518,10 @@ The server calculates `nextBillingOn` and returns `201 Created`.
 
 ### `GET /api/v1/subscriptions/:id`
 
-Returns one current-user subscription or `404`.
+Returns `SubscriptionDetail` for the current user, or `404`. List, create, and update
+responses keep using `Subscription`; the delivery lookup is detail-only and does not
+add ledger joins to every subscription query. The summary reports the relevant current
+or most recent occurrence without exposing the internal delivery ledger.
 
 ### `PATCH /api/v1/subscriptions/:id`
 
@@ -414,6 +538,12 @@ Accepts an editable subset of:
 - `recurrence`
 
 If any recurrence field changes, the client sends the complete `recurrence` object. The server recalculates `nextBillingOn`.
+
+The write compares the previously read `updatedAt` and reminder revision inside D1.
+If another request changed the row first, it returns
+`409 SUBSCRIPTION_STATE_CHANGED` instead of overwriting that newer state. Deleting a
+referenced category or payment method also advances the detached subscription's
+`updatedAt`, so a stale editor cannot silently restore the old association.
 
 Lifecycle and archival fields are rejected here and use explicit action endpoints.
 
@@ -519,6 +649,11 @@ type Dashboard = {
     subscriptionCount: number;
     reportingMonthlyAverage: string | null;
     reportingAnnualized: string | null;
+    totalsByCurrency: Array<{
+      currency: string;
+      monthlyEstimate: string;
+      annualizedEstimate: string;
+    }>;
   }>;
 };
 ```
@@ -537,26 +672,48 @@ Estimates are rounded only at the response boundary.
 
 ### `GET /api/v1/export`
 
-Returns a versioned JSON archive with a download content disposition. The exact format is defined in `import-export.md`.
+Returns a versioned JSON archive with a download content disposition. Profile and
+tenant resources are read from one consistent D1 batch snapshot. The exact format is
+defined in `import-export.md`.
 
 ### `POST /api/v1/imports/preview`
 
-Validates an archive without writing business data and returns:
+Validates an archive without writing business data. The reminder-capable archive
+version also requires the proposed `conflictStrategy` and `importProfile` so its safety
+impact matches the reviewed merge; changing either option requires another preview.
+It returns:
 
 - Parsed schema version.
 - Counts by resource type.
 - Warnings and unsupported fields.
 - Detected conflicts.
-- A SHA-256 digest of the server's canonical serialization of the validated archive.
+- A SHA-256 digest of the server's canonical serialization of the validated archive
+  plus the reviewed options, conflict counts, sender capability, and reminder impact.
+- For the reminder-capable archive version, a structured `reminderImpact` containing
+  `enabledPreferencesAfterApply`, `senderCapabilityAvailable`, and
+  `willForceGlobalPause` for the selected conflict strategy and profile option.
 
 An integer `schemaVersion` other than the current version returns
 `UNSUPPORTED_ARCHIVE_VERSION` before archive-field validation.
 
 ### `POST /api/v1/imports`
 
-Confirms an import by uploading the archive again with its expected digest, an explicit conflict strategy, and `confirmed: true`. The server repeats validation and rejects a digest mismatch.
+Confirms an import by uploading the archive again with its expected digest, an explicit
+conflict strategy, profile option, and `confirmed: true`. The server repeats validation,
+recomputes the review context from current account state, and rejects a digest mismatch.
 
-The MVP implements this route atomically with the selected conflict strategy and per-user resource limits.
+The reminder-capable version re-evaluates capability and actual enabled preferences
+after conflict resolution. A capability, conflict-state, or reminder-impact change
+between preview and confirmation invalidates the approval digest and requires a fresh
+preview. When the reviewed sender is unavailable and the resulting account has any
+enabled preference, confirmation forces the user pause in the same transaction
+regardless of `importProfile`. The response returns the final `reminderImpact`.
+
+Confirmation also carries an internal compare-and-swap guard into the write batch. If
+the account or any tenant resource changes between the confirmation read and the D1
+batch, every import write is rolled back and the endpoint returns
+`409 IMPORT_STATE_CHANGED`. The client must request a new preview instead of silently
+retrying the stale confirmation.
 
 ## 14. Request Limits
 
@@ -573,11 +730,16 @@ Limits are enforced before expensive parsing or database work where practical.
 
 ## 15. Concurrency and Idempotency
 
-- The MVP uses last-write-wins for ordinary PATCH operations.
-- Responses include `updatedAt` so optimistic concurrency can be introduced later.
+- Category, payment-method, and profile PATCH operations use last-write-wins.
+- Subscription PATCH and lifecycle writes use the previously read `updatedAt` plus
+  reminder revision as a D1 compare-and-swap guard because a stale whole-row write
+  could otherwise restore an opted-out reminder preference.
 - Lifecycle actions are idempotent by definition.
 - Create endpoints do not initially persist idempotency keys; the UI disables duplicate submission while a request is pending.
 - Import confirmation requires the preview digest and repeats full validation to prevent accidental mismatch.
+- Import apply uses a per-user resource revision and reviewed account fields as an
+  in-transaction compare-and-swap guard; a concurrent change returns
+  `IMPORT_STATE_CHANGED` with no partial import.
 
 ## 16. Logging
 
@@ -601,6 +763,8 @@ Logs must not include:
 - Payment method labels.
 - Import archive contents.
 - Concrete resource identifiers embedded in request paths.
+- Reminder recipient addresses, subscription names, email subjects or bodies, provider
+  response bodies, or raw provider exceptions.
 
 ## 17. Contract Testing
 
@@ -623,3 +787,6 @@ Required integration tests cover:
 - Dashboard category counts excluding cancelled and archived subscriptions.
 - Category batch-create atomicity and normalized-name conflicts.
 - Icon-token allow-list and single-grapheme emoji validation on every symbol-bearing resource.
+- Reminder contract coverage includes `null = inherit`, explicit opt-in,
+  account pause, capability-unavailable behavior, `0..365` bounds, persisted locale,
+  and independent partial-update semantics.

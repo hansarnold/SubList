@@ -25,6 +25,8 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../api/client";
+import { categoriesQueryKey, paymentMethodsQueryKey } from "../../api/query-keys";
+import { useSessionUserId } from "../../api/session";
 import type { Category, Dashboard, PaymentMethod, Subscription } from "../../api/types";
 import { PaymentMethodSymbol } from "../../components/ResourceSymbol";
 import {
@@ -334,6 +336,7 @@ function ListSummary({
 
 export function SubscriptionsPage() {
   const { t, i18n } = useTranslation();
+  const userId = useSessionUserId();
   const [searchParams, setSearchParams] = useSearchParams();
   const querySearch = searchParams.get("q") ?? "";
   const [searchDraft, setSearchDraft] = useState({ source: querySearch, value: querySearch });
@@ -363,8 +366,16 @@ export function SubscriptionsPage() {
   });
   const [categoriesQuery, paymentMethodsQuery, dashboardQuery] = useQueries({
     queries: [
-      { queryKey: ["categories"], queryFn: api.categories },
-      { queryKey: ["payment-methods"], queryFn: api.paymentMethods },
+      {
+        queryKey: categoriesQueryKey(userId),
+        queryFn: api.categories,
+        enabled: userId !== "pending",
+      },
+      {
+        queryKey: paymentMethodsQueryKey(userId),
+        queryFn: api.paymentMethods,
+        enabled: userId !== "pending",
+      },
       { queryKey: ["dashboard", 30], queryFn: () => api.dashboard(30) },
     ],
   });

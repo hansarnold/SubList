@@ -1,7 +1,8 @@
 # OpenSubLists MVP UI Flow
 
-> Status: Implemented baseline with approved refactor target
-> Last updated: 2026-08-23  
+> Status: Implemented baseline, resource-picker and chart refactor, and provider-gated
+> renewal email
+> Last updated: 2026-08-24
 > Targets: Narrow and wide web-browser viewports
 
 ## 1. Product Experience Goals
@@ -79,7 +80,7 @@ The user may skip display-name entry and all category choices. Recommended categ
 2. Next charge and charges due in the selected upcoming window.
 3. Grouped upcoming-charge agenda.
 4. Exact original-currency summaries.
-5. Category and payment-method breakdowns.
+5. Category and payment-method breakdowns with Bar and Donut views.
 6. Recent or newly added subscriptions when useful.
 
 At wide browser widths, the four reporting-currency estimates form the prominent first summary row. The upcoming-charge agenda follows as the primary detailed content area, without turning the page into a dense analytics dashboard.
@@ -130,6 +131,20 @@ Display:
 - A short explanation of what will appear.
 - Add Subscription as the only primary action.
 - Import Existing Data as a secondary action when import is implemented.
+
+## 6.5 Breakdown Charts — Implemented
+
+Category and payment-method breakdowns visualize estimated monthly average in
+the reporting currency. Each breakdown provides Bar and Donut views backed by the
+same metric and an adjacent complete text list. Bars are the default. The view
+must never add raw values from different currencies or silently change from money to
+count when FX is unavailable.
+
+The text list remains authoritative and includes the converted amount, approximate
+share, subscription count, and original-currency amounts. The chart is omitted
+for zero data, one positive group, or incomplete conversion, with an explicit state
+in its place. More detailed behavior is defined in
+[Subscription Editor, Email Reminders, GitHub Pages, and Dashboard Charts Plan](./subscription-editor-docs-and-charts-plan.md).
 
 ## 7. Subscription List
 
@@ -198,6 +213,14 @@ Every [1] [month]
 Every [2] [weeks]
 ```
 
+Category and payment method use the same association-field pattern. Each field shows
+`None`, existing tenant rows, Create
+from Preset, Create Custom, and Manage in Settings. Choosing a preset or custom action
+opens the corresponding compact editor; only a successful explicit resource save
+returns a UUID to the subscription form. The same interaction is available on Create
+and Edit, including successful empty-list, loading, query-error, and
+resource-create-error states.
+
 ## 8.2 Advanced Fields
 
 Collapsed by default:
@@ -205,6 +228,16 @@ Collapsed by default:
 - End-of-month toggle for monthly schedules.
 - Website URL.
 - Notes.
+
+Renewal email is a separate visible section before Advanced options. When it is
+enabled, show the read-only current verified account email, `Use
+account default — N days before` using the live account value, a custom `0..365` day
+choice, and the calculated reminder date. `0` means the renewal date. Authentication
+verification of the account email is shown separately from the global sender
+capability. Per-recipient provider verification remains operator-managed and is not
+claimed by the UI. The account default never turns the toggle on. If the deployment
+has no configured sender, keep disabling possible but prevent a new opt-in and explain
+that the operator must configure email first.
 
 The end-of-month toggle includes an example explaining the difference between February 28 → March 28 and February 28 → March 31.
 
@@ -245,6 +278,10 @@ Display:
 - Next three occurrences.
 - Category and payment method.
 - Website and notes.
+- Renewal-email opt-in, effective lead time, current account email,
+  next planned reminder date, and one coarse delivery state: scheduled, paused,
+  retrying, sent, failed, unknown, or expired. Include the occurrence and last-attempt
+  time when available; never show provider internals.
 - Created and last-updated timestamps in a secondary section.
 
 Primary actions:
@@ -291,23 +328,46 @@ Reactivation previews the newly calculated next billing date before confirmation
 
 Changing time zone warns that the definition of local today may change near midnight, then reconciles active subscriptions.
 
-## 11.2 Categories
+## 11.2 Renewal Email — Implemented and Provider-gated
+
+- Persisted language for background-generated email: English or Simplified Chinese.
+- Default lead time in `0..365`, initially seven days.
+- Whole-hour local delivery time, initially 09:00 in the configured IANA time zone.
+- `Pause all email reminders` as a global suppression control.
+- Verified primary email, read-only, with an explanation that Cloudflare provider
+  verification is a separate operator step on the free verified-destination path.
+- Deployment capability and failure state without provider names, tokens, or raw
+  errors.
+- A system-suspension warning that requires operator action and cannot be cleared by
+  the user pause switch. Unpause is also disabled while sender capability is absent.
+- A concise explanation that global pause keeps every per-subscription choice saved,
+  stops unstarted sends, and can resume only still-open reminder windows. An in-flight
+  email cannot be recalled.
+
+Manual renewal and high amount may motivate a person to enable email, but the UI does
+not infer either concept or preselect the toggle. Browser push remains out of scope.
+
+## 11.3 Categories
 
 - Ordered list with symbol, color, name, edit, and delete.
 - Empty and add states show recommended templates, the complete localized catalog, and Create Custom.
 - Selecting a template prefills localized name, color, and symbol; saved rows do not retain preset identity.
 - Add Recommended Categories reviews and atomically creates only missing ordinary rows.
 - Add and edit use the same compact form regardless of creation source.
+- Subscription Create and Edit reuse that compact form when a person creates a
+  category from the association field.
 - Deleting a category explains that subscriptions remain and become uncategorized.
 
-## 11.3 Payment Methods
+## 11.4 Payment Methods
 
 - Ordered list with symbol, kind, name, and safe label.
 - Preset choices appear before the form. A selection only prefills name, kind, and symbol; the user must review and save it.
+- Subscription Create and Edit reuse the same review-and-save form from the payment
+  association field.
 - The form explicitly asks only for a display label, not payment credentials.
 - Deleting a method explains that subscriptions remain and lose the association.
 
-## 11.4 Symbol Picker
+## 11.5 Symbol Picker
 
 Category, payment-method, and subscription forms reuse one picker with Common Icons,
 Emoji, and Clear actions. Common icons come from the application allow-list. Emoji may
@@ -321,7 +381,7 @@ resource name visible beside decorative output. Rendering fallbacks are:
 - Payment symbol, then a generic icon derived from `kind`.
 - Subscription symbol, then generated monogram.
 
-## 11.5 Data
+## 11.6 Data
 
 - Export JSON.
 - Import JSON.
@@ -332,13 +392,15 @@ resource name visible beside decorative output. Rendering fallbacks are:
 
 1. Select a local JSON file.
 2. Validate size before upload.
-3. Request server preview.
-4. Display resource counts, conflicts, and warnings.
-5. Select conflict strategy: Skip, Overwrite, or Duplicate.
-6. Optionally import profile settings.
+3. Select conflict strategy: Skip, Overwrite, or Duplicate, and whether to import
+   profile settings.
+4. Request server preview for those exact options.
+5. Display resource counts, conflicts, warnings, and reminder impact when present.
+6. Rerun preview whenever either option changes.
 7. Require an explicit confirmation.
-8. Upload and validate the same archive again with the expected digest.
-9. Display created, updated, skipped, and warning counts.
+8. Upload and validate the same archive again with the expected digest and options;
+   require a fresh preview if the reviewed account state or sender capability changed.
+9. Display created, updated, skipped, warning, and final reminder-impact counts.
 
 The UI never hides unsupported native SubList fields. Warnings remain downloadable or copyable after import.
 
@@ -389,6 +451,8 @@ Use the same not-found presentation for absent resources and resources owned by 
 
 - Initial locales: English and Simplified Chinese.
 - All UI strings use stable localization keys.
+- The selected locale is persisted on the user so scheduled renewal email does not
+  depend on browser `localStorage`.
 - Dates use the active locale but retain the user's configured time zone.
 - Currency formatting uses `Intl.NumberFormat` with explicit currency.
 - Internal status and error codes remain English identifiers.
@@ -400,7 +464,8 @@ Use the same not-found presentation for absent resources and resources owned by 
 - Light and dark color schemes through CSS custom properties.
 - Category color is an accent, not the only identifier.
 - Monetary totals use tabular numerals.
-- Avoid decorative charts when a compact list communicates the same information more clearly.
+- Use charts only when they communicate composition or timing more clearly than the
+  accompanying list. Every chart retains a complete text equivalent.
 - No background images, uploaded icons, arbitrary SVG, remote logos, or favicon fetching. Allow-listed bundled icons and one-emoji symbols are supported.
 
 ### 16.1 Selected Dashboard Prototype
@@ -413,8 +478,9 @@ This image is the selected visual reference for the authenticated wide-browser `
 - `Overview` as the visible localized English label for the Dashboard route.
 - Combined reporting-currency estimates with visible rate metadata, plus original-currency summaries.
 - A 30-day renewal agenda following the prominent reporting summary, with a secondary 7-day view.
-- Original-currency details and restrained amount-based category and payment-method breakdowns.
-- A compact first viewport that favors lists and direct values over decorative charts.
+- Original-currency details and restrained amount-based category and payment-method
+  breakdowns with user-selectable Donut views.
+- A compact first viewport that keeps charts secondary to direct values and lists.
 
 The image is directional rather than normative. Its product names, icons, amounts, dates, categories, and currency examples are mock content. The implementation must expose the approved four reporting-currency estimates, retain original-currency values, generate every recurrence occurrence inside the selected window, and preserve the route and API rules in this document. Resource symbols use the approved allow-listed icon or emoji model with documented fallbacks; the image does not authorize uploaded or remotely fetched service artwork.
 
@@ -477,12 +543,23 @@ Settings → Data → Export JSON → Browser downloads private non-cacheable ar
 Settings → Data → Select archive → Preview warnings → Choose strategy → Confirm → Review result
 ```
 
+### Renewal Email — Implemented and Provider-gated
+
+```text
+Open subscription → Enable email → Inherit or override lead time → Review projected reminder date → Save
+→ Hourly job verifies recurrence and lifecycle → One logical delivery row for that billing occurrence
+```
+
+```text
+Settings → Pause all email reminders → Existing per-subscription choices remain saved → No new deliveries
+```
+
 ## 19. Deferred UX
 
 - Public sign-up and invitation management.
 - Shared subscriptions and family workspaces.
 - Browser push notifications.
-- Email reminder configuration.
+- Multiple email reminders for one occurrence and automatic amount/manual-renewal rules.
 - App Store or screenshot import.
 - Price history and pause timeline.
 - Manual and historical exchange-rate controls.

@@ -1,19 +1,34 @@
 import type {
   AppCategory,
   AppPaymentMethod,
+  AppRenewalEmailDelivery,
   AppSubscription,
   AppUser,
   AuthenticatedIdentity,
   ExistingImportState,
+  ReminderDeliveryCandidate,
+  ReminderPlanningCandidate,
   SubscriptionListFilter,
 } from "../../application/models";
+import {
+  IdentityEmailConflictError,
+  ImportStateChangedError,
+  SubscriptionStateChangedError,
+} from "../../application/errors";
 import type {
   CategoryWrite,
+  ExportSnapshot,
   FxSnapshotReplaceResult,
+  ImportApplyGuard,
   ImportMutation,
+  ImportApplyOutcome,
   OpenSubListsRepository,
   PaymentMethodWrite,
   SubscriptionWrite,
+  ReminderDeliveryPlanWrite,
+  ReminderEmailSendOutcome,
+  ReminderProviderConfiguration,
+  ReminderStore,
 } from "../../application/ports";
 import {
   assertFxSnapshot,
@@ -29,24 +44,29 @@ import {
   mapPaymentMethodRow,
   mapSubscriptionRow,
   mapUserRow,
+  mapRenewalEmailDeliveryRow,
   type CategoryRow,
   type DashboardSubscriptionRow,
   type FxSnapshotJoinRow,
   type PaymentMethodRow,
   type SubscriptionRow,
   type UserRow,
+  type RenewalEmailDeliveryRow,
 } from "./rows";
 
 const SUBSCRIPTION_COLUMNS = `
   user_id, id, name, amount_micros, currency, recurrence_unit,
   recurrence_count, billing_anchor_on, anchor_mode, next_billing_on,
   status, cancelled_at, archived_at, category_id, payment_method_id,
-  symbol_type, symbol_value, website_url, notes, created_at, updated_at
+  symbol_type, symbol_value, website_url, notes, created_at, updated_at,
+  email_reminder_enabled, email_reminder_days_before, email_reminder_revision
 `;
 
 const CATEGORY_BATCH_LIMIT = 13;
 
-export class D1OpenSubListsRepository implements OpenSubListsRepository {
+type UserUpdatePatch = Parameters<OpenSubListsRepository["updateUser"]>[1];
+
+export class D1OpenSubListsRepository implements OpenSubListsRepository, ReminderStore {
   constructor(private readonly db: D1Database) {}
 
   async resolveUser(identity: AuthenticatedIdentity, now: number): Promise<AppUser> {
@@ -58,37 +78,51 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
         .prepare("SELECT id FROM users WHERE email_normalized = ?")
         .bind(emailNormalized)
         .first<{ id: string }>();
-      const updates = [
-        this.db
-          .prepare(
-            `UPDATE auth_identities
-             SET email = ?, email_normalized = ?, last_seen_at = ?
-             WHERE provider = ? AND subject = ?`,
-          )
-          .bind(identity.email, emailNormalized, now, identity.provider, identity.subject),
-      ];
-      if (emailOwner === null || emailOwner.id === existing.id) {
-        updates.push(
+      if (emailOwner !== null && emailOwner.id !== existing.id) {
+        await this.suspendForIdentityEmailConflict(existing.id, emailNormalized, now);
+        throw new IdentityEmailConflictError();
+      }
+
+      try {
+        await this.db.batch([
+          this.db
+            .prepare(
+              `UPDATE auth_identities
+               SET email = ?, email_normalized = ?, last_seen_at = ?
+               WHERE provider = ? AND subject = ?`,
+            )
+            .bind(identity.email, emailNormalized, now, identity.provider, identity.subject),
           this.db
             .prepare(
               `UPDATE users
-               SET primary_email = ?, email_normalized = ?, updated_at = ?
+               SET primary_email = ?,
+                   email_normalized = ?,
+                   email_reminder_revision = email_reminder_revision + CASE
+                     WHEN primary_email <> ? OR email_normalized <> ? THEN 1 ELSE 0 END,
+                   updated_at = CASE
+                     WHEN primary_email <> ? OR email_normalized <> ? THEN ? ELSE updated_at END
                WHERE id = ?`,
             )
-            .bind(identity.email, emailNormalized, now, existing.id),
-        );
+            .bind(
+              identity.email,
+              emailNormalized,
+              identity.email,
+              emailNormalized,
+              identity.email,
+              emailNormalized,
+              now,
+              existing.id,
+            ),
+          this.cancelDeliveriesForUserRevisionStatement(existing.id, now),
+        ]);
+      } catch (error) {
+        if (!isConstraintFailure(error)) throw error;
+        await this.suspendForIdentityEmailConflict(existing.id, emailNormalized, now);
+        throw new IdentityEmailConflictError();
       }
-      await this.db.batch(updates);
-      return mapUserRow({
-        ...existing,
-        ...(emailOwner === null || emailOwner.id === existing.id
-          ? {
-              primary_email: identity.email,
-              email_normalized: emailNormalized,
-              updated_at: now,
-            }
-          : {}),
-      });
+      const resolved = await this.getUser(existing.id);
+      if (resolved === null) throw new Error("Resolved user disappeared after identity refresh.");
+      return resolved;
     }
 
     const userWithEmail = await this.db
@@ -97,9 +131,9 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       .first<UserRow>();
 
     if (userWithEmail !== null) {
-      await this.db
+      const relink = await this.db
         .prepare(
-          `INSERT INTO auth_identities (
+          `INSERT OR IGNORE INTO auth_identities (
              provider, subject, user_id, email, email_normalized, created_at, last_seen_at
            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
@@ -113,8 +147,12 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
           now,
         )
         .run();
-      logIdentityRelink(userWithEmail.id, identity.provider);
-      return mapUserRow(userWithEmail);
+      const resolved = await this.findUserByIdentity(identity);
+      if (resolved === null || resolved.id !== userWithEmail.id) {
+        throw new IdentityEmailConflictError();
+      }
+      if (relink.meta.changes > 0) logIdentityRelink(userWithEmail.id, identity.provider);
+      return mapUserRow(resolved);
     }
 
     const userId = crypto.randomUUID();
@@ -182,9 +220,33 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       timezone: "UTC",
       reportingCurrency: "USD",
       onboardingCompletedAt: null,
+      preferredLocale: "en",
+      defaultEmailReminderDaysBefore: 7,
+      emailReminderLocalTime: "09:00",
+      emailRemindersPaused: false,
+      emailReminderRevision: 0,
+      emailReminderSuspensionReason: null,
+      emailReminderSuspensionEmailNormalized: null,
       createdAt: now,
       updatedAt: now,
     };
+  }
+
+  private async suspendForIdentityEmailConflict(
+    userId: string,
+    candidateEmailNormalized: string,
+    now: number,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE users
+         SET email_reminder_suspension_reason = 'identity_email_conflict',
+             email_reminder_suspension_email_normalized = ?,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(candidateEmailNormalized, now, userId)
+      .run();
   }
 
   private findUserByIdentity(identity: AuthenticatedIdentity): Promise<UserRow | null> {
@@ -207,18 +269,17 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     return row === null ? null : mapUserRow(row);
   }
 
-  async updateUser(
-    userId: string,
-    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">>,
-    now: number,
-  ): Promise<AppUser | null> {
-    await this.userUpdateStatement(userId, patch, now).run();
+  async updateUser(userId: string, patch: UserUpdatePatch, now: number): Promise<AppUser | null> {
+    await this.db.batch([
+      this.userUpdateStatement(userId, patch, now),
+      this.cancelDeliveriesForUserRevisionStatement(userId, now),
+    ]);
     return this.getUser(userId);
   }
 
   async updateUserWithReconciliation(
     userId: string,
-    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">>,
+    patch: UserUpdatePatch,
     updates: Array<{ id: string; nextBillingOn: string; updatedAt: number }>,
     now: number,
   ): Promise<AppUser | null> {
@@ -226,17 +287,20 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     if (updates.length > 0) {
       statements.push(this.reconciliationStatement(userId, updates));
     }
+    statements.push(this.cancelDeliveriesForUserRevisionStatement(userId, now));
     await this.db.batch(statements);
     return this.getUser(userId);
   }
 
   private userUpdateStatement(
     userId: string,
-    patch: Partial<Pick<AppUser, "displayName" | "timezone" | "reportingCurrency">>,
+    patch: UserUpdatePatch,
     now: number,
   ): D1PreparedStatement {
     const assignments: string[] = [];
     const values: unknown[] = [];
+    const revisionConditions: string[] = [];
+    const revisionValues: unknown[] = [];
     if ("displayName" in patch) {
       assignments.push("display_name = ?");
       values.push(patch.displayName ?? null);
@@ -244,16 +308,107 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     if (patch.timezone !== undefined) {
       assignments.push("timezone = ?");
       values.push(patch.timezone);
+      revisionConditions.push("timezone IS NOT ?");
+      revisionValues.push(patch.timezone);
     }
     if (patch.reportingCurrency !== undefined) {
       assignments.push("reporting_currency = ?");
       values.push(patch.reportingCurrency);
+    }
+    if (patch.preferredLocale !== undefined) {
+      assignments.push("preferred_locale = ?");
+      values.push(patch.preferredLocale);
+      revisionConditions.push("preferred_locale IS NOT ?");
+      revisionValues.push(patch.preferredLocale);
+    }
+    if (patch.defaultEmailReminderDaysBefore !== undefined) {
+      assignments.push("default_email_reminder_days_before = ?");
+      values.push(patch.defaultEmailReminderDaysBefore);
+      revisionConditions.push("default_email_reminder_days_before IS NOT ?");
+      revisionValues.push(patch.defaultEmailReminderDaysBefore);
+    }
+    if (patch.emailReminderLocalTime !== undefined) {
+      assignments.push("email_reminder_local_time = ?");
+      values.push(patch.emailReminderLocalTime);
+      revisionConditions.push("email_reminder_local_time IS NOT ?");
+      revisionValues.push(patch.emailReminderLocalTime);
+    }
+    if (patch.emailRemindersPaused !== undefined) {
+      assignments.push("email_reminders_paused = ?");
+      values.push(patch.emailRemindersPaused ? 1 : 0);
+    }
+    if (revisionConditions.length > 0) {
+      assignments.push(
+        `email_reminder_revision = email_reminder_revision + CASE WHEN ${revisionConditions.join(
+          " OR ",
+        )} THEN 1 ELSE 0 END`,
+      );
+      values.push(...revisionValues);
     }
     assignments.push("updated_at = ?");
     values.push(now, userId);
     return this.db
       .prepare(`UPDATE users SET ${assignments.join(", ")} WHERE id = ?`)
       .bind(...values);
+  }
+
+  private cancelDeliveriesForUserRevisionStatement(
+    userId: string,
+    now: number,
+  ): D1PreparedStatement {
+    return this.db
+      .prepare(
+        `UPDATE renewal_email_deliveries AS delivery
+         SET status = 'cancelled', next_attempt_at = NULL,
+             last_error_code = 'preference_or_revision_changed', updated_at = ?
+         WHERE delivery.user_id = ?
+           AND delivery.status IN ('pending', 'retry_wait')
+           AND delivery.planned_user_reminder_revision <> (
+             SELECT email_reminder_revision FROM users WHERE id = delivery.user_id
+           )`,
+      )
+      .bind(now, userId);
+  }
+
+  async clearEmailReminderIdentityConflict(
+    userId: string,
+    now: number,
+  ): Promise<"cleared" | "not_found" | "not_suspended" | "still_conflicted"> {
+    const current = await this.db
+      .prepare(
+        `SELECT email_reminder_suspension_reason AS reason,
+                email_reminder_suspension_email_normalized AS candidate
+         FROM users WHERE id = ?`,
+      )
+      .bind(userId)
+      .first<{ reason: string | null; candidate: string | null }>();
+    if (current === null) return "not_found";
+    if (current.reason !== "identity_email_conflict" || current.candidate === null) {
+      return "not_suspended";
+    }
+
+    const [result] = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE users
+           SET email_reminder_suspension_reason = NULL,
+               email_reminder_suspension_email_normalized = NULL,
+               email_reminders_paused = 1,
+               email_reminder_revision = email_reminder_revision + 1,
+               updated_at = ?
+           WHERE id = ?
+             AND email_reminder_suspension_reason = 'identity_email_conflict'
+             AND email_reminder_suspension_email_normalized = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM users AS owner
+               WHERE owner.id <> users.id
+                 AND owner.email_normalized = users.email_reminder_suspension_email_normalized
+             )`,
+        )
+        .bind(now, userId, current.candidate),
+      this.cancelDeliveriesForUserRevisionStatement(userId, now),
+    ]);
+    return (result?.meta.changes ?? 0) > 0 ? "cleared" : "still_conflicted";
   }
 
   async completeOnboarding(userId: string, now: number): Promise<AppUser | null> {
@@ -320,7 +475,7 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
       .bind(userId, serialized, userId, serialized)
       .run();
     if (result.meta.changes === 0) return null;
-    if (result.meta.changes !== values.length) {
+    if (result.meta.changes < values.length) {
       throw new Error("The category batch was not written atomically.");
     }
     return values.map((value) => ({ ...value }));
@@ -360,13 +515,14 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     return result.meta.changes === 0 ? null : this.getCategory(userId, id);
   }
 
-  async deleteCategory(userId: string, id: string): Promise<boolean> {
+  async deleteCategory(userId: string, id: string, now: number): Promise<boolean> {
     const results = await this.db.batch([
       this.db
         .prepare(
-          "UPDATE subscriptions SET category_id = NULL WHERE user_id = ? AND category_id = ?",
+          `UPDATE subscriptions SET category_id = NULL, updated_at = ?
+           WHERE user_id = ? AND category_id = ?`,
         )
-        .bind(userId, id),
+        .bind(now, userId, id),
       this.db.prepare("DELETE FROM categories WHERE user_id = ? AND id = ?").bind(userId, id),
     ]);
     return (results[1]?.meta.changes ?? 0) > 0;
@@ -450,13 +606,14 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     return result.meta.changes === 0 ? null : this.getPaymentMethod(userId, id);
   }
 
-  async deletePaymentMethod(userId: string, id: string): Promise<boolean> {
+  async deletePaymentMethod(userId: string, id: string, now: number): Promise<boolean> {
     const results = await this.db.batch([
       this.db
         .prepare(
-          "UPDATE subscriptions SET payment_method_id = NULL WHERE user_id = ? AND payment_method_id = ?",
+          `UPDATE subscriptions SET payment_method_id = NULL, updated_at = ?
+           WHERE user_id = ? AND payment_method_id = ?`,
         )
-        .bind(userId, id),
+        .bind(now, userId, id),
       this.db.prepare("DELETE FROM payment_methods WHERE user_id = ? AND id = ?").bind(userId, id),
     ]);
     return (results[1]?.meta.changes ?? 0) > 0;
@@ -526,6 +683,34 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     return result.results.map(mapSubscriptionRow);
   }
 
+  async readExportSnapshot(userId: string): Promise<ExportSnapshot> {
+    const [user, categories, paymentMethods, subscriptions] = await this.db.batch([
+      this.db.prepare("SELECT * FROM users WHERE id = ?").bind(userId),
+      this.db
+        .prepare("SELECT * FROM categories WHERE user_id = ? ORDER BY position, name, id")
+        .bind(userId),
+      this.db
+        .prepare("SELECT * FROM payment_methods WHERE user_id = ? ORDER BY position, name, id")
+        .bind(userId),
+      this.db
+        .prepare(
+          `SELECT ${SUBSCRIPTION_COLUMNS}
+           FROM subscriptions WHERE user_id = ? ORDER BY id`,
+        )
+        .bind(userId),
+    ]);
+
+    const userRow = user?.results[0] as UserRow | undefined;
+    return {
+      user: userRow === undefined ? null : mapUserRow(userRow),
+      categories: (categories?.results as CategoryRow[] | undefined)?.map(mapCategoryRow) ?? [],
+      paymentMethods:
+        (paymentMethods?.results as PaymentMethodRow[] | undefined)?.map(mapPaymentMethodRow) ?? [],
+      subscriptions:
+        (subscriptions?.results as SubscriptionRow[] | undefined)?.map(mapSubscriptionRow) ?? [],
+    };
+  }
+
   async listDashboardSubscriptions(userId: string) {
     const result = await this.db
       .prepare(
@@ -574,40 +759,84 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
   async updateSubscription(
     userId: string,
     value: AppSubscription,
+    expectedUpdatedAt: number,
+    expectedEmailReminderRevision: number,
   ): Promise<AppSubscription | null> {
-    const result = await this.db
-      .prepare(
-        `UPDATE subscriptions SET
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE subscriptions SET
            name = ?, amount_micros = ?, currency = ?, recurrence_unit = ?,
            recurrence_count = ?, billing_anchor_on = ?, anchor_mode = ?,
            next_billing_on = ?, status = ?, cancelled_at = ?, archived_at = ?,
            category_id = ?, payment_method_id = ?, symbol_type = ?, symbol_value = ?,
-           website_url = ?, notes = ?, updated_at = ?
-         WHERE user_id = ? AND id = ?`,
-      )
-      .bind(
-        value.name,
-        value.amountMicros,
-        value.currency,
-        value.recurrence.unit,
-        value.recurrence.count,
-        value.recurrence.anchorOn,
-        value.recurrence.anchorMode,
-        value.nextBillingOn,
-        value.status,
-        value.cancelledAt,
-        value.archivedAt,
-        value.categoryId,
-        value.paymentMethodId,
-        ...symbolColumns(value.symbol),
-        value.websiteUrl,
-        value.notes,
-        value.updatedAt,
-        userId,
-        value.id,
-      )
-      .run();
-    return result.meta.changes === 0 ? null : value;
+           website_url = ?, notes = ?, email_reminder_enabled = ?,
+           email_reminder_days_before = ?, email_reminder_revision = ?, updated_at = ?
+         WHERE user_id = ? AND id = ?
+           AND updated_at = ? AND email_reminder_revision = ?`,
+        )
+        .bind(
+          value.name,
+          value.amountMicros,
+          value.currency,
+          value.recurrence.unit,
+          value.recurrence.count,
+          value.recurrence.anchorOn,
+          value.recurrence.anchorMode,
+          value.nextBillingOn,
+          value.status,
+          value.cancelledAt,
+          value.archivedAt,
+          value.categoryId,
+          value.paymentMethodId,
+          ...symbolColumns(value.symbol),
+          value.websiteUrl,
+          value.notes,
+          value.emailReminderEnabled ? 1 : 0,
+          value.emailReminderDaysBefore,
+          value.emailReminderRevision,
+          value.updatedAt,
+          userId,
+          value.id,
+          expectedUpdatedAt,
+          expectedEmailReminderRevision,
+        ),
+      this.db
+        .prepare(
+          `UPDATE renewal_email_deliveries
+           SET status = 'cancelled', next_attempt_at = NULL,
+               last_error_code = 'preference_or_revision_changed', updated_at = ?
+           WHERE user_id = ? AND subscription_id = ?
+             AND status IN ('pending', 'retry_wait')
+             AND EXISTS (
+               SELECT 1 FROM subscriptions AS subscription
+               WHERE subscription.user_id = renewal_email_deliveries.user_id
+                 AND subscription.id = renewal_email_deliveries.subscription_id
+                 AND subscription.updated_at = ?
+                 AND subscription.email_reminder_revision = ?
+             )
+             AND (
+               planned_subscription_reminder_revision <> (
+                 SELECT subscription.email_reminder_revision
+                 FROM subscriptions AS subscription
+                 WHERE subscription.user_id = renewal_email_deliveries.user_id
+                   AND subscription.id = renewal_email_deliveries.subscription_id
+               )
+               OR NOT EXISTS (
+                 SELECT 1 FROM subscriptions AS subscription
+                 WHERE subscription.user_id = renewal_email_deliveries.user_id
+                   AND subscription.id = renewal_email_deliveries.subscription_id
+                   AND subscription.email_reminder_enabled = 1
+                   AND subscription.status = 'active'
+                   AND subscription.archived_at IS NULL
+               )
+             )`,
+        )
+        .bind(value.updatedAt, userId, value.id, value.updatedAt, value.emailReminderRevision),
+    ]);
+    if ((results[0]?.meta.changes ?? 0) > 0) return value;
+    if ((await this.getSubscription(userId, value.id)) === null) return null;
+    throw new SubscriptionStateChangedError();
   }
 
   async deleteSubscription(userId: string, id: string): Promise<boolean> {
@@ -721,51 +950,46 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
   }
 
   async getImportState(userId: string): Promise<ExistingImportState> {
-    const [categories, paymentMethods, subscriptions] = await Promise.all([
+    const [user, categories, paymentMethods, subscriptions] = await this.db.batch([
+      this.db.prepare("SELECT resource_revision FROM users WHERE id = ?").bind(userId),
+      this.db.prepare("SELECT id, name_key FROM categories WHERE user_id = ?").bind(userId),
+      this.db.prepare("SELECT id FROM payment_methods WHERE user_id = ?").bind(userId),
       this.db
-        .prepare("SELECT id, name_key FROM categories WHERE user_id = ?")
-        .bind(userId)
-        .all<{ id: string; name_key: string }>(),
-      this.db
-        .prepare("SELECT id FROM payment_methods WHERE user_id = ?")
-        .bind(userId)
-        .all<{ id: string }>(),
-      this.db
-        .prepare("SELECT id FROM subscriptions WHERE user_id = ?")
-        .bind(userId)
-        .all<{ id: string }>(),
+        .prepare("SELECT id, email_reminder_enabled FROM subscriptions WHERE user_id = ?")
+        .bind(userId),
     ]);
+    const categoryRows = categories?.results as Array<{ id: string; name_key: string }>;
+    const paymentMethodRows = paymentMethods?.results as Array<{ id: string }>;
+    const subscriptionRows = subscriptions?.results as Array<{
+      id: string;
+      email_reminder_enabled: number;
+    }>;
     return {
-      categoryIds: new Set(categories.results.map((row) => row.id)),
-      paymentMethodIds: new Set(paymentMethods.results.map((row) => row.id)),
-      subscriptionIds: new Set(subscriptions.results.map((row) => row.id)),
-      categoryNameKeysById: new Map(categories.results.map((row) => [row.id, row.name_key])),
+      resourceRevision: Number(
+        (user?.results[0] as { resource_revision?: number } | undefined)?.resource_revision ?? -1,
+      ),
+      categoryIds: new Set(categoryRows.map((row) => row.id)),
+      paymentMethodIds: new Set(paymentMethodRows.map((row) => row.id)),
+      subscriptionIds: new Set(subscriptionRows.map((row) => row.id)),
+      categoryNameKeysById: new Map(categoryRows.map((row) => [row.id, row.name_key])),
+      emailReminderEnabledBySubscriptionId: new Map(
+        subscriptionRows.map((row) => [row.id, row.email_reminder_enabled === 1]),
+      ),
     };
   }
 
   async applyImport(
     userId: string,
+    guard: ImportApplyGuard,
     mutations: ImportMutation[],
-    profilePatch: Pick<AppUser, "displayName" | "timezone" | "reportingCurrency"> | null,
+    profilePatch: UserUpdatePatch | null,
     reconciliationUpdates: Array<{ id: string; nextBillingOn: string; updatedAt: number }>,
     now: number,
-  ): Promise<void> {
-    const statements: D1PreparedStatement[] = [];
+    forcePauseWhenEnabled: boolean,
+  ): Promise<ImportApplyOutcome> {
+    const statements: D1PreparedStatement[] = [this.importStateGuardStatement(userId, guard)];
     if (profilePatch !== null) {
-      statements.push(
-        this.db
-          .prepare(
-            `UPDATE users SET display_name = ?, timezone = ?, reporting_currency = ?, updated_at = ?
-             WHERE id = ?`,
-          )
-          .bind(
-            profilePatch.displayName ?? null,
-            profilePatch.timezone,
-            profilePatch.reportingCurrency,
-            now,
-            userId,
-          ),
-      );
+      statements.push(this.userUpdateStatement(userId, profilePatch, now));
     }
     if (reconciliationUpdates.length > 0) {
       statements.push(this.reconciliationStatement(userId, reconciliationUpdates));
@@ -882,8 +1106,507 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
     for (const values of chunks(subscriptionOverwrites)) {
       statements.push(this.importSubscriptionOverwriteStatement(userId, values, now));
     }
+    if (profilePatch !== null) {
+      statements.push(this.cancelDeliveriesForUserRevisionStatement(userId, now));
+    }
+    if (subscriptionOverwrites.length > 0) {
+      statements.push(
+        this.db
+          .prepare(
+            `UPDATE renewal_email_deliveries AS delivery
+             SET status = 'cancelled', next_attempt_at = NULL,
+                 last_error_code = 'preference_or_revision_changed', updated_at = ?
+             WHERE delivery.user_id = ?
+               AND delivery.status IN ('pending', 'retry_wait')
+               AND delivery.planned_subscription_reminder_revision <> (
+                 SELECT subscription.email_reminder_revision
+                 FROM subscriptions AS subscription
+                 WHERE subscription.user_id = delivery.user_id
+                   AND subscription.id = delivery.subscription_id
+               )`,
+          )
+          .bind(now, userId),
+      );
+    }
+    statements.push(
+      this.db
+        .prepare(
+          `UPDATE users
+           SET email_reminders_paused = 1, updated_at = ?
+           WHERE id = ? AND ? = 1
+             AND EXISTS (
+               SELECT 1 FROM subscriptions
+               WHERE user_id = ? AND email_reminder_enabled = 1
+             )`,
+        )
+        .bind(now, userId, forcePauseWhenEnabled ? 1 : 0, userId),
+    );
+    const impactIndex = statements.length;
+    statements.push(
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS enabled_count
+           FROM subscriptions
+           WHERE user_id = ? AND email_reminder_enabled = 1`,
+        )
+        .bind(userId),
+    );
+    let results: D1Result[];
+    try {
+      results = await this.db.batch(statements);
+    } catch (error) {
+      if (isImportStateGuardFailure(error)) throw new ImportStateChangedError();
+      throw error;
+    }
+    if ((results[0]?.meta.changes ?? 0) === 0) throw new ImportStateChangedError();
+    const impact = results[impactIndex]?.results[0] as { enabled_count?: number } | undefined;
+    const enabledPreferencesAfterApply = Number(impact?.enabled_count ?? 0);
+    return {
+      enabledPreferencesAfterApply,
+      forcedGlobalPause: forcePauseWhenEnabled && enabledPreferencesAfterApply > 0,
+    };
+  }
 
-    if (statements.length > 0) await this.db.batch(statements);
+  async maintainReminderDeliveries(now: number): Promise<void> {
+    await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE renewal_email_deliveries
+           SET status = 'unknown', lease_expires_at = NULL,
+               last_error_code = 'lease_expired_ambiguous', updated_at = ?
+           WHERE status = 'sending' AND lease_expires_at <= ?`,
+        )
+        .bind(now, now),
+      this.db
+        .prepare(
+          `UPDATE renewal_email_deliveries
+           SET status = 'expired', next_attempt_at = NULL,
+               last_error_code = 'delivery_window_expired', updated_at = ?
+           WHERE status IN ('pending', 'retry_wait') AND expires_at <= ?`,
+        )
+        .bind(now, now),
+      this.db
+        .prepare(
+          `UPDATE renewal_email_deliveries AS delivery
+           SET status = 'cancelled', next_attempt_at = NULL,
+               last_error_code = 'preference_or_revision_changed', updated_at = ?
+           WHERE delivery.status IN ('pending', 'retry_wait')
+             AND EXISTS (
+               SELECT 1
+               FROM users AS user
+               JOIN subscriptions AS subscription
+                 ON subscription.user_id = user.id
+                AND subscription.id = delivery.subscription_id
+               WHERE user.id = delivery.user_id
+                 AND (
+                   subscription.email_reminder_enabled = 0
+                   OR subscription.status <> 'active'
+                   OR subscription.archived_at IS NOT NULL
+                   OR user.email_reminder_revision <> delivery.planned_user_reminder_revision
+                   OR subscription.email_reminder_revision <>
+                     delivery.planned_subscription_reminder_revision
+                 )
+             )`,
+        )
+        .bind(now),
+    ]);
+  }
+
+  async listReminderPlanningCandidates(): Promise<ReminderPlanningCandidate[]> {
+    const [users, subscriptions] = await Promise.all([
+      this.db
+        .prepare(
+          `SELECT user.*
+           FROM users AS user
+           WHERE user.email_reminders_paused = 0
+             AND user.email_reminder_suspension_reason IS NULL
+             AND EXISTS (
+               SELECT 1 FROM subscriptions AS subscription
+               WHERE subscription.user_id = user.id
+                 AND subscription.email_reminder_enabled = 1
+                 AND subscription.status = 'active'
+                 AND subscription.archived_at IS NULL
+             )
+           ORDER BY user.id`,
+        )
+        .all<UserRow>(),
+      this.db
+        .prepare(
+          `SELECT subscription.*
+           FROM subscriptions AS subscription
+           WHERE subscription.email_reminder_enabled = 1
+             AND subscription.status = 'active'
+             AND subscription.archived_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM users AS user
+               WHERE user.id = subscription.user_id
+                 AND user.email_reminders_paused = 0
+                 AND user.email_reminder_suspension_reason IS NULL
+             )
+           ORDER BY subscription.user_id, subscription.id`,
+        )
+        .all<SubscriptionRow>(),
+    ]);
+    const usersById = new Map(users.results.map((row) => [row.id, mapUserRow(row)]));
+    return subscriptions.results.flatMap((row) => {
+      const user = usersById.get(row.user_id);
+      return user === undefined ? [] : [{ user, subscription: mapSubscriptionRow(row) }];
+    });
+  }
+
+  async upsertReminderDeliveryPlan(value: ReminderDeliveryPlanWrite): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `INSERT INTO renewal_email_deliveries (
+           id, user_id, subscription_id, billing_on, effective_days_before,
+           intended_send_at, expires_at, status, attempt_count,
+           planned_user_reminder_revision, planned_subscription_reminder_revision,
+           created_at, updated_at
+         )
+         SELECT ?, subscription.user_id, subscription.id, ?, ?, ?, ?, 'pending', 0,
+                ?, ?, ?, ?
+         FROM subscriptions AS subscription
+         JOIN users AS user ON user.id = subscription.user_id
+         WHERE subscription.user_id = ?
+           AND subscription.id = ?
+           AND subscription.email_reminder_enabled = 1
+           AND subscription.status = 'active'
+           AND subscription.archived_at IS NULL
+           AND subscription.email_reminder_revision = ?
+           AND user.email_reminders_paused = 0
+           AND user.email_reminder_suspension_reason IS NULL
+           AND user.email_reminder_revision = ?
+         ON CONFLICT(user_id, subscription_id, billing_on) DO UPDATE SET
+           effective_days_before = excluded.effective_days_before,
+           intended_send_at = excluded.intended_send_at,
+           expires_at = excluded.expires_at,
+           status = 'pending',
+           claimed_at = NULL,
+           lease_expires_at = NULL,
+           next_attempt_at = NULL,
+           last_error_code = NULL,
+           planned_user_reminder_revision = excluded.planned_user_reminder_revision,
+           planned_subscription_reminder_revision =
+             excluded.planned_subscription_reminder_revision,
+           updated_at = excluded.updated_at
+         WHERE renewal_email_deliveries.attempt_count = 0
+           AND renewal_email_deliveries.status IN ('pending', 'cancelled')
+           AND excluded.expires_at > ?`,
+      )
+      .bind(
+        value.id,
+        value.billingOn,
+        value.effectiveDaysBefore,
+        value.intendedSendAt,
+        value.expiresAt,
+        value.plannedUserReminderRevision,
+        value.plannedSubscriptionReminderRevision,
+        value.now,
+        value.now,
+        value.userId,
+        value.subscriptionId,
+        value.plannedSubscriptionReminderRevision,
+        value.plannedUserReminderRevision,
+        value.now,
+      )
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  async listDueReminderDeliveries(
+    now: number,
+    limit: number,
+  ): Promise<ReminderDeliveryCandidate[]> {
+    const rows = await this.db
+      .prepare(
+        `SELECT delivery.*
+         FROM renewal_email_deliveries AS delivery
+         JOIN users AS user ON user.id = delivery.user_id
+         JOIN subscriptions AS subscription
+           ON subscription.user_id = delivery.user_id
+          AND subscription.id = delivery.subscription_id
+         WHERE delivery.expires_at > ?
+           AND (
+             (delivery.status = 'pending' AND delivery.intended_send_at <= ?)
+             OR
+             (delivery.status = 'retry_wait' AND delivery.next_attempt_at <= ?)
+           )
+           AND user.email_reminders_paused = 0
+           AND user.email_reminder_suspension_reason IS NULL
+           AND user.email_reminder_revision = delivery.planned_user_reminder_revision
+           AND subscription.email_reminder_enabled = 1
+           AND subscription.status = 'active'
+           AND subscription.archived_at IS NULL
+           AND subscription.email_reminder_revision =
+             delivery.planned_subscription_reminder_revision
+         ORDER BY COALESCE(delivery.next_attempt_at, delivery.intended_send_at), delivery.id
+         LIMIT ?`,
+      )
+      .bind(now, now, now, Math.max(1, Math.min(limit, 100)))
+      .all<RenewalEmailDeliveryRow>();
+    return this.loadReminderDeliveryCandidates(rows.results);
+  }
+
+  async claimReminderDelivery(
+    id: string,
+    now: number,
+    leaseExpiresAt: number,
+    configuration: ReminderProviderConfiguration,
+  ): Promise<ReminderDeliveryCandidate | null> {
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          `UPDATE renewal_email_deliveries
+           SET status = 'cancelled', next_attempt_at = NULL,
+               last_error_code = 'provider_configuration_changed', updated_at = ?
+           WHERE id = ? AND status = 'retry_wait' AND attempt_count > 0
+             AND (
+               provider_key IS NOT ?
+               OR provider_config_revision IS NOT ?
+               OR template_version IS NOT ?
+             )`,
+        )
+        .bind(
+          now,
+          id,
+          configuration.providerKey,
+          configuration.providerConfigRevision,
+          configuration.templateVersion,
+        ),
+      this.db
+        .prepare(
+          `UPDATE renewal_email_deliveries AS delivery
+           SET status = 'sending',
+               attempt_count = attempt_count + 1,
+               claimed_at = ?,
+               lease_expires_at = ?,
+               next_attempt_at = NULL,
+               provider_key = COALESCE(provider_key, ?),
+               provider_config_revision = COALESCE(provider_config_revision, ?),
+               application_idempotency_key = COALESCE(
+                 application_idempotency_key,
+                 'renewal:' || user_id || ':' || subscription_id || ':' || billing_on
+               ),
+               template_version = COALESCE(template_version, ?),
+               last_error_code = NULL,
+               updated_at = ?
+           WHERE delivery.id = ?
+             AND delivery.expires_at > ?
+             AND delivery.attempt_count < 3
+             AND (
+               (delivery.status = 'pending' AND delivery.intended_send_at <= ?)
+               OR
+               (delivery.status = 'retry_wait' AND delivery.next_attempt_at <= ?)
+             )
+             AND EXISTS (
+               SELECT 1
+               FROM users AS user
+               JOIN subscriptions AS subscription
+                 ON subscription.user_id = user.id
+                AND subscription.id = delivery.subscription_id
+               WHERE user.id = delivery.user_id
+                 AND user.email_reminders_paused = 0
+                 AND user.email_reminder_suspension_reason IS NULL
+                 AND user.email_reminder_revision = delivery.planned_user_reminder_revision
+                 AND subscription.email_reminder_enabled = 1
+                 AND subscription.status = 'active'
+                 AND subscription.archived_at IS NULL
+                 AND subscription.email_reminder_revision =
+                   delivery.planned_subscription_reminder_revision
+             )`,
+        )
+        .bind(
+          now,
+          leaseExpiresAt,
+          configuration.providerKey,
+          configuration.providerConfigRevision,
+          configuration.templateVersion,
+          now,
+          id,
+          now,
+          now,
+          now,
+        ),
+      this.db.prepare("SELECT * FROM renewal_email_deliveries WHERE id = ?").bind(id),
+      this.db
+        .prepare(
+          `SELECT user.* FROM users AS user
+           JOIN renewal_email_deliveries AS delivery ON delivery.user_id = user.id
+           WHERE delivery.id = ?`,
+        )
+        .bind(id),
+      this.db
+        .prepare(
+          `SELECT subscription.*
+           FROM subscriptions AS subscription
+           JOIN renewal_email_deliveries AS delivery
+             ON delivery.user_id = subscription.user_id
+            AND delivery.subscription_id = subscription.id
+           WHERE delivery.id = ?`,
+        )
+        .bind(id),
+    ]);
+    if ((results[1]?.meta.changes ?? 0) === 0) return null;
+    const deliveryRow = results[2]?.results[0] as RenewalEmailDeliveryRow | undefined;
+    const userRow = results[3]?.results[0] as UserRow | undefined;
+    const subscriptionRow = results[4]?.results[0] as SubscriptionRow | undefined;
+    if (deliveryRow === undefined || userRow === undefined || subscriptionRow === undefined) {
+      throw new Error("Claimed reminder candidate could not be read atomically.");
+    }
+    return {
+      delivery: mapRenewalEmailDeliveryRow(deliveryRow),
+      user: mapUserRow(userRow),
+      subscription: mapSubscriptionRow(subscriptionRow),
+    };
+  }
+
+  async recordReminderDeliveryOutcome(
+    id: string,
+    attemptCount: number,
+    outcome: ReminderEmailSendOutcome,
+    now: number,
+    nextAttemptAt: number | null,
+  ): Promise<boolean> {
+    const errorCode =
+      outcome.kind === "accepted" ? null : normalizeReminderErrorCode(outcome.errorCode);
+    let status: AppRenewalEmailDelivery["status"];
+    let storedErrorCode = errorCode;
+    let retryAt: number | null = null;
+    if (outcome.kind === "accepted") {
+      status = "sent";
+    } else if (outcome.kind === "ambiguous") {
+      status = "unknown";
+    } else if (outcome.kind === "permanent") {
+      status = "failed";
+    } else if (attemptCount >= 3) {
+      status = "failed";
+      storedErrorCode = "retry_exhausted";
+    } else if (nextAttemptAt === null) {
+      status = "failed";
+      storedErrorCode = "retry_window_closed";
+    } else {
+      status = "retry_wait";
+      retryAt = nextAttemptAt;
+    }
+
+    const result = await this.db
+      .prepare(
+        `UPDATE renewal_email_deliveries
+         SET status = ?, lease_expires_at = NULL, next_attempt_at = ?,
+             sent_at = ?, provider_message_id = ?, last_error_code = ?, updated_at = ?
+         WHERE id = ? AND status = 'sending' AND attempt_count = ?`,
+      )
+      .bind(
+        status,
+        retryAt,
+        status === "sent" ? now : null,
+        outcome.kind === "accepted" ? outcome.providerMessageId : null,
+        storedErrorCode,
+        now,
+        id,
+        attemptCount,
+      )
+      .run();
+    return result.meta.changes > 0;
+  }
+
+  async listSubscriptionReminderDeliveries(
+    userId: string,
+    subscriptionId: string,
+    limit: number,
+  ): Promise<AppRenewalEmailDelivery[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT * FROM renewal_email_deliveries
+         WHERE user_id = ? AND subscription_id = ?
+         ORDER BY intended_send_at DESC, id DESC
+         LIMIT ?`,
+      )
+      .bind(userId, subscriptionId, Math.max(1, Math.min(limit, 100)))
+      .all<RenewalEmailDeliveryRow>();
+    return result.results.map(mapRenewalEmailDeliveryRow);
+  }
+
+  private async loadReminderDeliveryCandidates(
+    deliveryRows: readonly RenewalEmailDeliveryRow[],
+  ): Promise<ReminderDeliveryCandidate[]> {
+    if (deliveryRows.length === 0) return [];
+    const userIds = [...new Set(deliveryRows.map((row) => row.user_id))];
+    const subscriptionKeys = deliveryRows.map((row) => ({
+      userId: row.user_id,
+      subscriptionId: row.subscription_id,
+    }));
+    const [users, subscriptions] = await Promise.all([
+      this.db
+        .prepare("SELECT * FROM users WHERE id IN (SELECT value FROM json_each(?))")
+        .bind(JSON.stringify(userIds))
+        .all<UserRow>(),
+      this.db
+        .prepare(
+          `SELECT subscription.*
+           FROM subscriptions AS subscription
+           JOIN json_each(?) AS item
+             ON subscription.user_id = json_extract(item.value, '$.userId')
+            AND subscription.id = json_extract(item.value, '$.subscriptionId')`,
+        )
+        .bind(JSON.stringify(subscriptionKeys))
+        .all<SubscriptionRow>(),
+    ]);
+    const usersById = new Map(users.results.map((row) => [row.id, mapUserRow(row)]));
+    const subscriptionsByKey = new Map(
+      subscriptions.results.map((row) => [`${row.user_id}:${row.id}`, mapSubscriptionRow(row)]),
+    );
+    return deliveryRows.flatMap((row) => {
+      const user = usersById.get(row.user_id);
+      const subscription = subscriptionsByKey.get(`${row.user_id}:${row.subscription_id}`);
+      return user === undefined || subscription === undefined
+        ? []
+        : [{ delivery: mapRenewalEmailDeliveryRow(row), user, subscription }];
+    });
+  }
+
+  private importStateGuardStatement(userId: string, guard: ImportApplyGuard): D1PreparedStatement {
+    const { user } = guard;
+    return this.db
+      .prepare(
+        `UPDATE users
+         SET primary_email = CASE WHEN
+           resource_revision = ?
+           AND primary_email IS ?
+           AND display_name IS ?
+           AND timezone IS ?
+           AND reporting_currency IS ?
+           AND onboarding_completed_at IS ?
+           AND preferred_locale IS ?
+           AND default_email_reminder_days_before IS ?
+           AND email_reminder_local_time IS ?
+           AND email_reminders_paused IS ?
+           AND email_reminder_revision IS ?
+           AND email_reminder_suspension_reason IS ?
+           AND email_reminder_suspension_email_normalized IS ?
+           AND created_at IS ?
+           AND updated_at IS ?
+         THEN primary_email ELSE NULL END
+         WHERE id = ?`,
+      )
+      .bind(
+        guard.resourceRevision,
+        user.primaryEmail,
+        user.displayName,
+        user.timezone,
+        user.reportingCurrency,
+        user.onboardingCompletedAt,
+        user.preferredLocale,
+        user.defaultEmailReminderDaysBefore,
+        user.emailReminderLocalTime,
+        user.emailRemindersPaused ? 1 : 0,
+        user.emailReminderRevision,
+        user.emailReminderSuspensionReason,
+        user.emailReminderSuspensionEmailNormalized,
+        user.createdAt,
+        user.updatedAt,
+        userId,
+      );
   }
 
   private importSubscriptionInsertStatement(
@@ -896,7 +1619,8 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
            user_id, id, name, amount_micros, currency, recurrence_unit,
            recurrence_count, billing_anchor_on, anchor_mode, next_billing_on,
            status, cancelled_at, archived_at, category_id, payment_method_id,
-           symbol_type, symbol_value, website_url, notes, created_at, updated_at
+           symbol_type, symbol_value, website_url, notes, created_at, updated_at,
+           email_reminder_enabled, email_reminder_days_before, email_reminder_revision
          )
          SELECT ?,
                 json_extract(item.value, '$.id'),
@@ -918,7 +1642,10 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
                 json_extract(item.value, '$.websiteUrl'),
                 json_extract(item.value, '$.notes'),
                 CAST(json_extract(item.value, '$.createdAt') AS INTEGER),
-                CAST(json_extract(item.value, '$.updatedAt') AS INTEGER)
+                CAST(json_extract(item.value, '$.updatedAt') AS INTEGER),
+                CAST(json_extract(item.value, '$.emailReminderEnabled') AS INTEGER),
+                CAST(json_extract(item.value, '$.emailReminderDaysBefore') AS INTEGER),
+                0
          FROM json_each(?) AS item`,
       )
       .bind(userId, JSON.stringify(values));
@@ -949,6 +1676,30 @@ export class D1OpenSubListsRepository implements OpenSubListsRepository {
              symbol_value = json_extract(item.value, '$.symbol.value'),
              website_url = json_extract(item.value, '$.websiteUrl'),
              notes = json_extract(item.value, '$.notes'),
+             email_reminder_enabled = CAST(
+               json_extract(item.value, '$.emailReminderEnabled') AS INTEGER
+             ),
+             email_reminder_days_before = CAST(
+               json_extract(item.value, '$.emailReminderDaysBefore') AS INTEGER
+             ),
+             email_reminder_revision = email_reminder_revision + CASE WHEN
+               name IS NOT json_extract(item.value, '$.name')
+               OR amount_micros IS NOT CAST(json_extract(item.value, '$.amountMicros') AS INTEGER)
+               OR currency IS NOT json_extract(item.value, '$.currency')
+               OR recurrence_unit IS NOT json_extract(item.value, '$.recurrence.unit')
+               OR recurrence_count IS NOT CAST(json_extract(item.value, '$.recurrence.count') AS INTEGER)
+               OR billing_anchor_on IS NOT json_extract(item.value, '$.recurrence.anchorOn')
+               OR anchor_mode IS NOT json_extract(item.value, '$.recurrence.anchorMode')
+               OR status IS NOT json_extract(item.value, '$.status')
+               OR cancelled_at IS NOT CAST(json_extract(item.value, '$.cancelledAt') AS INTEGER)
+               OR archived_at IS NOT CAST(json_extract(item.value, '$.archivedAt') AS INTEGER)
+               OR email_reminder_enabled IS NOT CAST(
+                 json_extract(item.value, '$.emailReminderEnabled') AS INTEGER
+               )
+               OR email_reminder_days_before IS NOT CAST(
+                 json_extract(item.value, '$.emailReminderDaysBefore') AS INTEGER
+               )
+               THEN 1 ELSE 0 END,
              updated_at = ?
          FROM json_each(?) AS item
          WHERE subscription.user_id = ?
@@ -979,13 +1730,25 @@ function isConstraintFailure(error: unknown): boolean {
   );
 }
 
+function isImportStateGuardFailure(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /NOT NULL constraint failed: users\.primary_email/i.test(error.message)
+  );
+}
+
+function normalizeReminderErrorCode(value: string): string {
+  return /^[a-z0-9_]{1,64}$/.test(value) ? value : "provider_error";
+}
+
 function subscriptionInsertSql(): string {
   return `INSERT INTO subscriptions (
     user_id, id, name, amount_micros, currency, recurrence_unit,
     recurrence_count, billing_anchor_on, anchor_mode, next_billing_on,
     status, cancelled_at, archived_at, category_id, payment_method_id,
-    symbol_type, symbol_value, website_url, notes, created_at, updated_at
-  ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+    symbol_type, symbol_value, website_url, notes, created_at, updated_at,
+    email_reminder_enabled, email_reminder_days_before, email_reminder_revision
+  ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
 }
 
 function subscriptionValues(userId: string, value: SubscriptionWrite): unknown[] {
@@ -1010,6 +1773,9 @@ function subscriptionValues(userId: string, value: SubscriptionWrite): unknown[]
     value.notes,
     value.createdAt,
     value.updatedAt,
+    value.emailReminderEnabled ? 1 : 0,
+    value.emailReminderDaysBefore,
+    value.emailReminderRevision,
   ];
 }
 

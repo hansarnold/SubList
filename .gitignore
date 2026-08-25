@@ -10,5 +10,7 @@ wrangler.local.jsonc
 coverage/
 playwright-report/
 test-results/
+site/.vitepress/cache/
+site/.vitepress/dist/
 *.log
 .DS_Store
