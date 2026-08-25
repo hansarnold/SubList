@@ -368,8 +368,8 @@ The detailed delivery sequence and acceptance gates are defined in
 - [x] Separate Interface language and Email language without mismatch warnings or
       copy-language actions.
 - [x] Replace user-facing preset terminology, sparse template walls, checkboxes, and
-      ambiguous operations with compact Saved, Common, Create, and Add-and-select
-      flows.
+      ambiguous operations with saved lists plus visible compact Common choices in
+      Settings and Saved/Common/Create/Add-and-select association flows.
 - [x] Add a top-level category overview with useful grouped subscription previews,
       image-free category identity, filtered-list drill-down, and separate Settings
       management.
@@ -497,7 +497,8 @@ The following do not block the first hosted deployment:
 - Interface language and renewal-email language are separate preferences. A
   difference between them is valid and never produces a warning.
 - `Preset` remains an internal creation-template concept. User-facing copy
-  names saved resources, common choices, creation, and the final add/select result.
+  names saved resources, visibly presented common choices in Settings and association
+  pickers, creation, and the final add/select result.
 - `/categories` is an image-free browsing route and category CRUD remains
   at `/settings/categories`; selecting a group reuses the existing Subscriptions
   category filter rather than adding a category-detail API.

@@ -9,7 +9,6 @@ import {
   IconDatabaseImport,
   IconLanguage,
   IconPlus,
-  IconSearch,
   IconSparkles,
   IconTrash,
   IconUserCircle,
@@ -420,7 +419,6 @@ export function CategorySettingsPage() {
     enabled: userId !== "pending",
   });
   const [draft, setDraft] = useState<{
-    stage: "choices" | "editor";
     editing: CategoryType | null;
     name: string;
     color: string;
@@ -429,7 +427,6 @@ export function CategorySettingsPage() {
     returnFocusTo: HTMLElement | null;
   } | null>(null);
   const [deleting, setDeleting] = useState<CategoryType | null>(null);
-  const [commonSearch, setCommonSearch] = useState("");
   const mutation = useMutation({
     mutationFn: ({
       id,
@@ -479,17 +476,9 @@ export function CategorySettingsPage() {
   const commonCategories = CATEGORY_PRESETS.filter(
     (preset) => !existingNames.has(normalizeCategoryNameKey(t(preset.labelKey))),
   );
-  const normalizedCommonSearch = commonSearch.trim().toLocaleLowerCase();
-  const visibleCommonCategories = normalizedCommonSearch
-    ? commonCategories.filter((preset) =>
-        t(preset.labelKey).toLocaleLowerCase().includes(normalizedCommonSearch),
-      )
-    : commonCategories;
-  const showCommonSearch = categories.length + commonCategories.length > 10;
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draft || draft.stage !== "editor") return;
+    if (!draft) return;
     const values = new FormData(event.currentTarget);
     mutation.mutate({
       id: draft.editing?.id,
@@ -502,9 +491,7 @@ export function CategorySettingsPage() {
 
   function openAddDialog() {
     mutation.reset();
-    setCommonSearch("");
     setDraft({
-      stage: "choices",
       editing: null,
       name: "",
       color: "#3b82f6",
@@ -517,7 +504,6 @@ export function CategorySettingsPage() {
   function startEditing(category: CategoryType) {
     mutation.reset();
     setDraft({
-      stage: "editor",
       editing: category,
       name: category.name,
       color: category.color,
@@ -527,19 +513,16 @@ export function CategorySettingsPage() {
     });
   }
 
-  function openBlankEditor() {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            stage: "editor",
-            name: "",
-            color: "#3b82f6",
-            symbol: null,
-            revision: current.revision + 1,
-          }
-        : current,
-    );
+  function openCommonCategory(preset: (typeof CATEGORY_PRESETS)[number]) {
+    mutation.reset();
+    setDraft({
+      editing: null,
+      name: t(preset.labelKey),
+      color: preset.color,
+      symbol: preset.symbol,
+      revision: 0,
+      returnFocusTo: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    });
   }
 
   return (
@@ -584,6 +567,22 @@ export function CategorySettingsPage() {
           <p className="resource-empty">{t("settings.noCategories")}</p>
         )}
       </div>
+      {commonCategories.length ? (
+        <section className="resource-common-section" aria-labelledby="common-categories-title">
+          <h3 id="common-categories-title">
+            <IconSparkles size={17} aria-hidden="true" />
+            {t("form.commonCategories")}
+          </h3>
+          <div className="resource-suggestion-grid resource-suggestion-grid--inline">
+            {commonCategories.map((preset) => (
+              <button type="button" key={preset.key} onClick={() => openCommonCategory(preset)}>
+                <CategorySymbol symbol={preset.symbol} color={preset.color} size={21} />
+                <span>{t(preset.labelKey)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {draft ? (
         <SettingsEditorDialog
           title={draft.editing ? t("settings.editCategory") : t("settings.addCategory")}
@@ -593,97 +592,38 @@ export function CategorySettingsPage() {
             if (!mutation.isPending) setDraft(null);
           }}
         >
-          {draft.stage === "choices" ? (
-            <div className="resource-settings-dialog__choices">
-              <p>{t("settings.chooseCategoryStart")}</p>
-              {commonCategories.length ? (
-                <section aria-labelledby="common-categories-title">
-                  <h3 id="common-categories-title">
-                    <IconSparkles size={17} aria-hidden="true" />
-                    {t("form.commonCategories")}
-                  </h3>
-                  {showCommonSearch ? (
-                    <label className="resource-association__search">
-                      <IconSearch size={17} aria-hidden="true" />
-                      <span className="visually-hidden">{t("form.searchCommonCategories")}</span>
-                      <input
-                        type="search"
-                        value={commonSearch}
-                        onChange={(event) => setCommonSearch(event.target.value)}
-                        placeholder={t("form.searchCommonCategories")}
-                        autoFocus
-                      />
-                    </label>
-                  ) : null}
-                  <div className="resource-suggestion-grid">
-                    {visibleCommonCategories.map((preset) => (
-                      <button
-                        type="button"
-                        key={preset.key}
-                        onClick={() =>
-                          setDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  stage: "editor",
-                                  name: t(preset.labelKey),
-                                  color: preset.color,
-                                  symbol: preset.symbol,
-                                  revision: current.revision + 1,
-                                }
-                              : current,
-                          )
-                        }
-                      >
-                        <CategorySymbol symbol={preset.symbol} color={preset.color} size={21} />
-                        <span>{t(preset.labelKey)}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {normalizedCommonSearch && visibleCommonCategories.length === 0 ? (
-                    <p className="resource-empty">{t("form.noCommonMatches")}</p>
-                  ) : null}
-                </section>
-              ) : null}
-              <Button type="button" variant="secondary" onClick={openBlankEditor}>
-                <IconPlus size={18} aria-hidden="true" />
-                {t("form.createCategory")}
+          <form className="resource-settings-dialog__form" onSubmit={submit} key={draft.revision}>
+            {mutation.isError ? (
+              <InlineNotice tone="danger">{mutation.error.message}</InlineNotice>
+            ) : null}
+            <CategoryEditorFields
+              defaultName={draft.name}
+              defaultColor={draft.color}
+              symbol={draft.symbol}
+              onSymbolChange={(symbol) =>
+                setDraft((current) => (current ? { ...current, symbol } : current))
+              }
+              disabled={mutation.isPending}
+              autoFocus
+            />
+            <div className="dialog__actions">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setDraft(null)}
+                disabled={mutation.isPending}
+              >
+                {t("app.cancel")}
+              </Button>
+              <Button type="submit" disabled={mutation.isPending}>
+                {mutation.isPending
+                  ? t("app.saving")
+                  : draft.editing
+                    ? t("app.save")
+                    : t("settings.addCategory")}
               </Button>
             </div>
-          ) : (
-            <form className="resource-settings-dialog__form" onSubmit={submit} key={draft.revision}>
-              {mutation.isError ? (
-                <InlineNotice tone="danger">{mutation.error.message}</InlineNotice>
-              ) : null}
-              <CategoryEditorFields
-                defaultName={draft.name}
-                defaultColor={draft.color}
-                symbol={draft.symbol}
-                onSymbolChange={(symbol) =>
-                  setDraft((current) => (current ? { ...current, symbol } : current))
-                }
-                disabled={mutation.isPending}
-                autoFocus
-              />
-              <div className="dialog__actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setDraft(null)}
-                  disabled={mutation.isPending}
-                >
-                  {t("app.cancel")}
-                </Button>
-                <Button type="submit" disabled={mutation.isPending}>
-                  {mutation.isPending
-                    ? t("app.saving")
-                    : draft.editing
-                      ? t("app.save")
-                      : t("settings.addCategory")}
-                </Button>
-              </div>
-            </form>
-          )}
+          </form>
         </SettingsEditorDialog>
       ) : null}
       <Dialog
@@ -710,7 +650,6 @@ export function PaymentMethodSettingsPage() {
     enabled: userId !== "pending",
   });
   const [draft, setDraft] = useState<{
-    stage: "choices" | "editor";
     editing: PaymentMethod | null;
     name: string;
     kind: PaymentMethodKind;
@@ -720,7 +659,6 @@ export function PaymentMethodSettingsPage() {
     returnFocusTo: HTMLElement | null;
   } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [commonSearch, setCommonSearch] = useState("");
   const deleting = query.data?.find((payment) => payment.id === deletingId) ?? null;
   const mutation = useMutation({
     mutationFn: (input: {
@@ -778,17 +716,9 @@ export function PaymentMethodSettingsPage() {
   const commonPaymentMethods = PAYMENT_METHOD_PRESETS.filter(
     (preset) => !existingNames.has(normalizeCategoryNameKey(t(preset.labelKey))),
   );
-  const normalizedCommonSearch = commonSearch.trim().toLocaleLowerCase();
-  const visibleCommonPaymentMethods = normalizedCommonSearch
-    ? commonPaymentMethods.filter((preset) =>
-        t(preset.labelKey).toLocaleLowerCase().includes(normalizedCommonSearch),
-      )
-    : commonPaymentMethods;
-  const showCommonSearch = paymentMethods.length + commonPaymentMethods.length > 10;
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draft || draft.stage !== "editor") return;
+    if (!draft) return;
     const values = new FormData(event.currentTarget);
     mutation.mutate({
       id: draft.editing?.id,
@@ -802,9 +732,7 @@ export function PaymentMethodSettingsPage() {
 
   function openAddDialog() {
     mutation.reset();
-    setCommonSearch("");
     setDraft({
-      stage: "choices",
       editing: null,
       name: "",
       kind: "card",
@@ -820,12 +748,24 @@ export function PaymentMethodSettingsPage() {
     if (!paymentMethod) return;
     mutation.reset();
     setDraft({
-      stage: "editor",
       editing: paymentMethod,
       name: paymentMethod.name,
       kind: paymentMethod.kind,
       label: paymentMethod.label ?? "",
       symbol: paymentMethod.symbol,
+      revision: 0,
+      returnFocusTo: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    });
+  }
+
+  function openCommonPaymentMethod(preset: (typeof PAYMENT_METHOD_PRESETS)[number]) {
+    mutation.reset();
+    setDraft({
+      editing: null,
+      name: t(preset.labelKey),
+      kind: preset.kind,
+      label: "",
+      symbol: preset.symbol,
       revision: 0,
       returnFocusTo: document.activeElement instanceof HTMLElement ? document.activeElement : null,
     });
@@ -880,6 +820,26 @@ export function PaymentMethodSettingsPage() {
           <p className="resource-empty">{t("settings.noPaymentMethods")}</p>
         )}
       </div>
+      {commonPaymentMethods.length ? (
+        <section className="resource-common-section" aria-labelledby="common-payment-methods-title">
+          <h3 id="common-payment-methods-title">
+            <IconSparkles size={17} aria-hidden="true" />
+            {t("form.commonPaymentMethods")}
+          </h3>
+          <div className="resource-suggestion-grid resource-suggestion-grid--inline">
+            {commonPaymentMethods.map((preset) => (
+              <button
+                type="button"
+                key={preset.key}
+                onClick={() => openCommonPaymentMethod(preset)}
+              >
+                <PaymentMethodSymbol symbol={preset.symbol} kind={preset.kind} size={21} />
+                <span>{t(preset.labelKey)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {draft ? (
         <SettingsEditorDialog
           title={draft.editing ? t("settings.editPaymentMethod") : t("settings.addPaymentMethod")}
@@ -889,118 +849,39 @@ export function PaymentMethodSettingsPage() {
             if (!mutation.isPending) setDraft(null);
           }}
         >
-          {draft.stage === "choices" ? (
-            <div className="resource-settings-dialog__choices">
-              <p>{t("settings.choosePaymentMethodStart")}</p>
-              {commonPaymentMethods.length ? (
-                <section aria-labelledby="common-payment-methods-title">
-                  <h3 id="common-payment-methods-title">
-                    <IconSparkles size={17} aria-hidden="true" />
-                    {t("form.commonPaymentMethods")}
-                  </h3>
-                  {showCommonSearch ? (
-                    <label className="resource-association__search">
-                      <IconSearch size={17} aria-hidden="true" />
-                      <span className="visually-hidden">
-                        {t("form.searchCommonPaymentMethods")}
-                      </span>
-                      <input
-                        type="search"
-                        value={commonSearch}
-                        onChange={(event) => setCommonSearch(event.target.value)}
-                        placeholder={t("form.searchCommonPaymentMethods")}
-                        autoFocus
-                      />
-                    </label>
-                  ) : null}
-                  <div className="resource-suggestion-grid">
-                    {visibleCommonPaymentMethods.map((preset) => (
-                      <button
-                        type="button"
-                        key={preset.key}
-                        onClick={() =>
-                          setDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  stage: "editor",
-                                  name: t(preset.labelKey),
-                                  kind: preset.kind,
-                                  symbol: preset.symbol,
-                                  revision: current.revision + 1,
-                                }
-                              : current,
-                          )
-                        }
-                      >
-                        <PaymentMethodSymbol symbol={preset.symbol} kind={preset.kind} size={21} />
-                        <span>{t(preset.labelKey)}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {normalizedCommonSearch && visibleCommonPaymentMethods.length === 0 ? (
-                    <p className="resource-empty">{t("form.noCommonMatches")}</p>
-                  ) : null}
-                </section>
-              ) : null}
+          <form className="resource-settings-dialog__form" onSubmit={submit} key={draft.revision}>
+            {mutation.isError ? (
+              <InlineNotice tone="danger">{mutation.error.message}</InlineNotice>
+            ) : null}
+            <PaymentMethodEditorFields
+              defaultName={draft.name}
+              defaultKind={draft.kind}
+              defaultLabel={draft.label}
+              symbol={draft.symbol}
+              onSymbolChange={(symbol) =>
+                setDraft((current) => (current ? { ...current, symbol } : current))
+              }
+              disabled={mutation.isPending}
+              autoFocus
+            />
+            <div className="dialog__actions">
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() =>
-                  setDraft((current) =>
-                    current
-                      ? {
-                          ...current,
-                          stage: "editor",
-                          name: "",
-                          kind: "card",
-                          label: "",
-                          symbol: null,
-                          revision: current.revision + 1,
-                        }
-                      : current,
-                  )
-                }
+                onClick={() => setDraft(null)}
+                disabled={mutation.isPending}
               >
-                <IconPlus size={18} aria-hidden="true" />
-                {t("form.createPaymentMethod")}
+                {t("app.cancel")}
+              </Button>
+              <Button type="submit" disabled={mutation.isPending}>
+                {mutation.isPending
+                  ? t("app.saving")
+                  : draft.editing
+                    ? t("app.save")
+                    : t("settings.addPaymentMethod")}
               </Button>
             </div>
-          ) : (
-            <form className="resource-settings-dialog__form" onSubmit={submit} key={draft.revision}>
-              {mutation.isError ? (
-                <InlineNotice tone="danger">{mutation.error.message}</InlineNotice>
-              ) : null}
-              <PaymentMethodEditorFields
-                defaultName={draft.name}
-                defaultKind={draft.kind}
-                defaultLabel={draft.label}
-                symbol={draft.symbol}
-                onSymbolChange={(symbol) =>
-                  setDraft((current) => (current ? { ...current, symbol } : current))
-                }
-                disabled={mutation.isPending}
-                autoFocus
-              />
-              <div className="dialog__actions">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setDraft(null)}
-                  disabled={mutation.isPending}
-                >
-                  {t("app.cancel")}
-                </Button>
-                <Button type="submit" disabled={mutation.isPending}>
-                  {mutation.isPending
-                    ? t("app.saving")
-                    : draft.editing
-                      ? t("app.save")
-                      : t("settings.addPaymentMethod")}
-                </Button>
-              </div>
-            </form>
-          )}
+          </form>
         </SettingsEditorDialog>
       ) : null}
       <Dialog

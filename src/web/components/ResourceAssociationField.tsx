@@ -481,8 +481,56 @@ export function ResourceAssociationField({
   ) : value ? (
     <span>{t("form.currentAssociationUnavailable")}</span>
   ) : (
-    <span>{kind === "category" ? t("form.noCategory") : t("form.noPaymentMethod")}</span>
+    <span>{kind === "category" ? t("form.chooseCategory") : t("form.choosePaymentMethod")}</span>
   );
+
+  const savedOptions = (
+    <section className="resource-association__section">
+      <h3>{kind === "category" ? t("form.savedCategories") : t("form.savedPaymentMethods")}</h3>
+      <button
+        type="button"
+        className={!value ? "is-selected" : undefined}
+        aria-pressed={!value}
+        onClick={() => selectResource("")}
+      >
+        <span className="resource-association__empty-symbol" aria-hidden="true">
+          —
+        </span>
+        <span>{kind === "category" ? t("form.noCategory") : t("form.noPaymentMethod")}</span>
+      </button>
+      {filteredResources.map((resource) => (
+        <button
+          type="button"
+          className={resource.id === value ? "is-selected" : undefined}
+          aria-pressed={resource.id === value}
+          key={resource.id}
+          onClick={() => selectResource(resource.id)}
+        >
+          {resourceSymbol(kind, resource)}
+          <span>{resource.name}</span>
+        </button>
+      ))}
+      {normalizedSearch && filteredResources.length === 0 ? (
+        <p>{t("form.noResourceMatches")}</p>
+      ) : null}
+    </section>
+  );
+
+  const commonOptions = availablePresets.length ? (
+    <section className="resource-association__section">
+      <h3>
+        <IconSparkles size={16} aria-hidden="true" />
+        {kind === "category" ? t("form.commonCategories") : t("form.commonPaymentMethods")}
+      </h3>
+      {filteredPresets.map((preset) => (
+        <button type="button" key={preset.key} onClick={() => openPreset(preset)}>
+          {presetSymbol(preset)}
+          <span>{preset.name}</span>
+        </button>
+      ))}
+      {normalizedSearch && filteredPresets.length === 0 ? <p>{t("form.noCommonMatches")}</p> : null}
+    </section>
+  ) : null;
 
   return (
     <div ref={rootRef} className="resource-association" onKeyDown={handleKeyDown}>
@@ -549,55 +597,8 @@ export function ResourceAssociationField({
             </label>
           ) : null}
 
-          <section className="resource-association__section">
-            <h3>
-              {kind === "category" ? t("form.savedCategories") : t("form.savedPaymentMethods")}
-            </h3>
-            <button
-              type="button"
-              className={!value ? "is-selected" : undefined}
-              aria-pressed={!value}
-              onClick={() => selectResource("")}
-            >
-              <span className="resource-association__empty-symbol" aria-hidden="true">
-                —
-              </span>
-              <span>{kind === "category" ? t("form.noCategory") : t("form.noPaymentMethod")}</span>
-            </button>
-            {filteredResources.map((resource) => (
-              <button
-                type="button"
-                className={resource.id === value ? "is-selected" : undefined}
-                aria-pressed={resource.id === value}
-                key={resource.id}
-                onClick={() => selectResource(resource.id)}
-              >
-                {resourceSymbol(kind, resource)}
-                <span>{resource.name}</span>
-              </button>
-            ))}
-            {normalizedSearch && filteredResources.length === 0 ? (
-              <p>{t("form.noResourceMatches")}</p>
-            ) : null}
-          </section>
-
-          {availablePresets.length ? (
-            <section className="resource-association__section">
-              <h3>
-                <IconSparkles size={16} aria-hidden="true" />
-                {kind === "category" ? t("form.commonCategories") : t("form.commonPaymentMethods")}
-              </h3>
-              {filteredPresets.map((preset) => (
-                <button type="button" key={preset.key} onClick={() => openPreset(preset)}>
-                  {presetSymbol(preset)}
-                  <span>{preset.name}</span>
-                </button>
-              ))}
-              {normalizedSearch && filteredPresets.length === 0 ? (
-                <p>{t("form.noCommonMatches")}</p>
-              ) : null}
-            </section>
-          ) : null}
+          {resources.length === 0 ? commonOptions : savedOptions}
+          {resources.length === 0 ? savedOptions : commonOptions}
 
           <div className="resource-association__actions">
             <Button type="button" variant="ghost" onClick={openCustomDraft}>

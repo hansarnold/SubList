@@ -79,7 +79,11 @@ function renderField({
 describe("subscription resource association field", () => {
   it("shows saved, common, and create flows without leaving the subscription form", () => {
     renderField();
-    fireEvent.click(screen.getByRole("button", { name: /Category/ }));
+    const trigger = screen.getByRole("button", { name: "Category Choose category" });
+    fireEvent.click(trigger);
+    expect(
+      screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent),
+    ).toEqual(["Common categories", "Saved categories"]);
     expect(screen.getByRole("heading", { name: "Saved categories" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Common categories" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Entertainment" })).toBeTruthy();
@@ -291,6 +295,7 @@ describe("subscription resource association field", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Payment method/ }));
+    expect(screen.getByRole("heading", { name: "Common payment methods" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Visa" }));
     expect(screen.getByRole("dialog", { name: "Create payment method" })).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {

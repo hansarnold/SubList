@@ -414,10 +414,11 @@ not infer either concept or preselect the toggle. Browser push remains out of sc
 ## 11.3 Categories
 
 - Ordered list with symbol, color, name, edit, and delete.
-- One `Add category` action opens a compact dialog; the complete common catalog is
-  not rendered permanently in the page body.
-- The add dialog offers Common categories and Create category. Choosing a common item
-  prefills localized name, color, and symbol; `Add category` performs the save.
+- A compact, visible Common categories section follows the saved list and is present
+  on initial load, including when the saved list is empty.
+- Choosing a common item opens the shared editor with localized name, color, and
+  symbol; `Add category` performs the save.
+- The header `Add category` action opens the same compact editor with a blank draft.
 - Existing normalized names are omitted from Common choices rather than shown as
   disabled or `Already added` rows.
 - No Settings flow uses template checkboxes, `Ready to add`, `Add selected`, or `Use
@@ -430,10 +431,12 @@ preset` copy.
 ## 11.4 Payment Methods
 
 - Ordered list with symbol, kind, name, and safe label.
-- One `Add payment method` action opens a compact dialog containing Common payment
-  methods and Create payment method.
+- A compact, visible Common payment methods section follows the saved list and is
+  present on initial load, including when the saved list is empty.
 - Choosing a common item prefills name, kind, and symbol; the primary action remains
   `Add payment method`, never `Use preset`.
+- The header `Add payment method` action opens the same reviewed editor with a blank
+  draft.
 - Subscription Create and Edit reuse the same review-and-save form from the payment
   association field.
 - The form explicitly asks only for a display label, not payment credentials.

@@ -179,6 +179,8 @@ const en = {
       none: "None",
       noCategory: "No category",
       noPaymentMethod: "No payment method",
+      chooseCategory: "Choose category",
+      choosePaymentMethod: "Choose payment method",
       advanced: "Advanced options",
       endOfMonth: "Keep renewals at the end of each month",
       endOfMonthHelp:
@@ -678,6 +680,8 @@ const zhHans = {
       none: "无",
       noCategory: "无分类",
       noPaymentMethod: "无付款方式",
+      chooseCategory: "选择分类",
+      choosePaymentMethod: "选择付款方式",
       advanced: "高级选项",
       endOfMonth: "保持在每个月的最后一天续费",
       endOfMonthHelp: "例如启用后，2 月 28 日的订阅会在 3 月 31 日续费，而不是 3 月 28 日。",

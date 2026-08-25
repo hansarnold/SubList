@@ -1057,7 +1057,7 @@ button:disabled,
 
 .resource-association__actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 7px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
@@ -3340,6 +3340,22 @@ button:disabled,
   font-size: 0.82rem;
 }
 
+.resource-common-section {
+  display: grid;
+  gap: 11px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.resource-common-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
 .resource-suggestion-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3371,6 +3387,10 @@ button:disabled,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.resource-suggestion-grid--inline {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .onboarding-category-choices > button > span {

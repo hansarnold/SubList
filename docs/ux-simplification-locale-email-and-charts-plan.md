@@ -24,8 +24,8 @@ The approved outcome is:
   "use interface language" action.
 - `Preset` remains an internal implementation term. Product copy describes common
   choices and the result of an action.
-- Category and payment-method pages show saved resources first, not a permanent wall
-  of templates.
+- Category and payment-method pages show saved resources first, followed by compact,
+  visible Common choices rather than a sparse template wall.
 - Categories become a first-class browsing dimension without turning Category
   Settings into an analytics page.
 - Subscription Create and Edit continue to support saved resources, common choices,
@@ -302,14 +302,12 @@ The page hierarchy becomes:
 1. Page title and one `Add category` action.
 2. Compact list of the user's saved categories.
 3. One concise empty state when no category exists.
+4. A compact, visible `Common categories` section containing choices that have not
+   already been saved.
 
-The full common-category catalog is removed from the page body. Selecting
-`Add category` opens one dialog containing:
-
-- A compact `Common categories` section.
-- A `Create category` path for a blank draft.
-- Name, color, and symbol fields in the same editor used for later edits.
-- One primary `Add category` button and one `Cancel` action.
+Selecting a Common choice opens the shared name, color, and symbol editor with a
+localized draft. The header `Add category` action opens the same editor with a blank
+draft. Both paths end with one primary `Add category` button and one `Cancel` action.
 
 Choosing a common category only prefills the draft. It does not save until `Add
 category` is selected. Suggestions whose normalized names already exist are omitted
@@ -321,11 +319,12 @@ Payment Method Settings uses the same hierarchy and dialog pattern:
 
 1. Page title and one `Add payment method` action.
 2. Compact saved-method list.
-3. Common choices inside the add dialog, not as a permanent page section.
+3. A compact, visible `Common payment methods` section containing unsaved choices.
 4. One reviewed editor for name, kind, safe label, and symbol.
 
-Choosing a common method prefills the editor. The primary action remains `Add payment
-method`; there is no `Use preset` step or informational notice that a draft is ready.
+Choosing a common method opens and prefills the editor. The header action opens a
+blank editor. The primary action remains `Add payment method`; there is no `Use
+preset` step or informational notice that a draft is ready.
 
 ### 5.4 Subscription Create and Edit
 
@@ -566,7 +565,7 @@ normal Cron event; do not add an unauthenticated HTTP endpoint merely to create 
 | Reminder revision     | UI language changes invalidate email          | Only email-language changes invalidate email                            |
 | Archive               | V3 `preferredLocale`                          | Runtime V4 with both locale fields; V3 is offline input only            |
 | Resource wording      | Preset-oriented                               | Saved, Common, Create, Add and select                                   |
-| Settings suggestions  | Permanent sparse lists                        | Suggestions inside one add dialog                                       |
+| Settings suggestions  | Permanent sparse lists                        | Visible compact Common sections with shared editors                     |
 | Category navigation   | Settings, filters, and Dashboard breakdowns   | Top-level browse route plus separate Settings management                |
 | Chart display         | One mode at a time; single group has no chart | Bar and Pie both visible; one group renders 100%                        |
 | Email availability UI | Global warning and disabled controls          | Normal UI hides unavailable actions; operator docs own deployment state |
@@ -591,7 +590,8 @@ The focused contracts in `data-model.md`, `api-contract.md`, `import-export.md`,
 ### Phase B: Resource UX — Implemented
 
 1. Add component tests that reproduce the wide-row layout defect.
-2. Replace settings preset sections with one add dialog per resource type.
+2. Replace sparse settings preset walls with compact visible Common sections and
+   shared editors.
 3. Add the top-level Categories route and responsive navigation entry.
 4. Compose category cards from the existing category, Dashboard, and filtered
    subscription requests without per-category calls.
@@ -631,6 +631,8 @@ acceptance gates and are not claimed complete by source implementation alone.
 - No user-facing screen contains `Use preset`, `Ready to add`, or `Create from preset`.
 - Category and payment-method settings no longer render a wide permanent suggestion
   table or multi-select checkbox wall.
+- Category and payment-method settings expose compact Common choices on initial page
+  load, including for an account with no saved resources.
 - `/categories` is a primary browse route distinct from `/settings/categories`, and
   the page header provides the only direct management action.
 - Every category card exposes identity, active count, explicit estimated monthly and
