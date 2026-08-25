@@ -34,6 +34,17 @@ export default defineConfig({
   titleTemplate: ":title · OpenSubLists",
   description: "A simple, open-source subscription tracker for Cloudflare Workers and D1.",
   base: "/SubList/",
+  head: [
+    [
+      "link",
+      {
+        rel: "icon",
+        type: "image/png",
+        sizes: "1024x1024",
+        href: "/SubList/open-sublists-logo.png",
+      },
+    ],
+  ],
   lastUpdated: true,
   sitemap: {
     hostname: "https://hansarnold.github.io/SubList/",
@@ -44,6 +55,7 @@ export default defineConfig({
     }
   },
   themeConfig: {
+    logo: "/open-sublists-logo.png",
     nav: [
       { text: "Home", link: "/" },
       { text: "Self-hosting", link: "/guide/self-hosting" },

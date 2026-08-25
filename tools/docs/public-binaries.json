@@ -5,6 +5,11 @@
       "source": "docs/assets/open-sublists-dashboard-prototype-web.png",
       "outputBasename": "open-sublists-dashboard-prototype-web",
       "sha256": "1ccb02be67f964e66d6d5de647b2a2991828693b1f55d91b4231a6757e5f630d"
+    },
+    {
+      "source": "docs/assets/open-sublists-logo.png",
+      "outputBasename": "open-sublists-logo",
+      "sha256": "28b72950a9551fd1498077f0a68f711704a7763212ab9a2240413a49741be91e"
     }
   ]
 }

@@ -20,9 +20,11 @@ const binaryManifestPath = "tools/docs/public-binaries.json";
 const requiredInputs = [
   "docs/self-hosting.md",
   "docs/assets/open-sublists-dashboard-prototype-web.png",
+  "docs/assets/open-sublists-logo.png",
   "site/.vitepress/config.mts",
   "site/index.md",
   "site/guide/self-hosting.md",
+  "site/public/open-sublists-logo.png",
   binaryManifestPath,
 ];
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconChevronDown, IconListDetails, IconSparkles } from "@tabler/icons-react";
+import { IconChevronDown, IconSparkles } from "@tabler/icons-react";
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +8,7 @@ import { categoriesQueryKey } from "../../api/query-keys";
 import type { Category, Session } from "../../api/types";
 import { CategorySymbol } from "../../components/ResourceSymbol";
 import { Button, Field, InlineNotice } from "../../components/ui";
+import { BrandMark } from "../../components/BrandMark";
 import { normalizeCategoryNameKey } from "../../../domain/text-normalization";
 import {
   CATEGORY_PRESETS,
@@ -140,9 +141,7 @@ export function WelcomePage() {
           <p className="page-eyebrow">{t("app.name")}</p>
           <h1>{t("onboarding.title")}</h1>
         </div>
-        <span className="brand__mark" aria-hidden="true">
-          <IconListDetails size={23} stroke={2.1} />
-        </span>
+        <BrandMark />
       </header>
 
       <section className="surface settings-panel">

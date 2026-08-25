@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/assets/open-sublists-logo.png" alt="OpenSubLists logo" width="120" height="120">
+</p>
+
 # OpenSubLists
 
 OpenSubLists is a small, self-hostable subscription tracker built as a responsive website on Cloudflare Workers and D1.

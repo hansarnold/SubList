@@ -2,13 +2,13 @@ import {
   IconCategory,
   IconCreditCard,
   IconHome,
-  IconListDetails,
   IconPlus,
   IconSettings,
 } from "@tabler/icons-react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { BrandMark } from "../components/BrandMark";
 
 const primaryNavigation = [
   { to: "/dashboard", labelKey: "nav.overview", icon: IconHome },
@@ -54,9 +54,7 @@ export function AppShell() {
       </a>
       <aside className="sidebar" aria-label={t("app.primaryNavigation")}>
         <Link to="/dashboard" className="brand">
-          <span className="brand__mark" aria-hidden="true">
-            <IconListDetails size={23} stroke={2.1} />
-          </span>
+          <BrandMark />
           <span>{t("app.name")}</span>
         </Link>
         <nav className="sidebar__nav">
@@ -78,9 +76,7 @@ export function AppShell() {
 
       <header className="mobile-header">
         <Link to="/dashboard" className="brand brand--mobile">
-          <span className="brand__mark" aria-hidden="true">
-            <IconListDetails size={20} />
-          </span>
+          <BrandMark />
           <span>{t("app.name")}</span>
         </Link>
         <Link

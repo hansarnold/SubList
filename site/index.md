@@ -7,6 +7,9 @@ hero:
   name: OpenSubLists
   text: A subscription ledger you control
   tagline: Track recurring costs in their original currencies, estimate monthly and yearly totals, and keep the deployment small.
+  image:
+    src: /open-sublists-logo.png
+    alt: OpenSubLists logo
   actions:
     - theme: brand
       text: Run locally
