@@ -4,6 +4,22 @@ OpenSubLists is a small, self-hostable subscription tracker built as a responsiv
 
 It provides recurring billing calculations, combined reporting-currency estimates with original-currency disclosures and separate Bar and Pie breakdowns, localized category and payment-method choices directly in the subscription editor, an information-dense category browser, common icon and emoji symbols, portable JSON import/export, independent interface and email languages, and explicit per-subscription renewal email reminders. Cloudflare Access supplies invite-only email authentication for hosted environments, while a fixed local identity keeps development fully offline from Access.
 
+## Screenshots
+
+### Dashboard
+
+Compare estimated monthly costs with separate category amount and share views while
+keeping every original-currency value visible.
+
+![OpenSubLists dashboard with category bar and pie charts](./docs/assets/open-sublists-dashboard.jpg)
+
+### Subscriptions
+
+Search, filter, categorize, and review upcoming renewals from the core subscription
+ledger.
+
+![OpenSubLists subscription list with filters and recurring-cost cards](./docs/assets/open-sublists-subscriptions.jpg)
+
 ## Stack
 
 - React, React Router, TanStack Query, and i18next in the browser.
